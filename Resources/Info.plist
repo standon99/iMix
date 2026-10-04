@@ -2,18 +2,19 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>SoundStage</string>
-    <key>CFBundleDisplayName</key><string>SoundStage</string>
-    <key>CFBundleIdentifier</key><string>local.soundstage.app</string>
-    <key>CFBundleExecutable</key><string>SoundStage</string>
+    <key>CFBundleName</key><string>iSound</string>
+    <key>CFBundleDisplayName</key><string>iSound</string>
+    <key>CFBundleIdentifier</key><string>local.isound.app</string>
+    <key>CFBundleExecutable</key><string>iSound</string>
     <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.2</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>SoundStage listens to test sweeps through the microphone to measure each speaker's latency during calibration.</string>
+    <string>iSound listens to test sweeps through the microphone to measure each speaker's latency during calibration.</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>SoundStage captures Spotify's audio so it can split it across your speakers.</string>
+    <string>iSound captures the audio your Mac plays so it can split it across your speakers and equalize it.</string>
 </dict>
 </plist>

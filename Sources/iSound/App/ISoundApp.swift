@@ -2,7 +2,9 @@ import AppKit
 import SwiftUI
 
 @main
-struct SoundStageApp: App {
+struct ISoundApp: App {
+    // Declared first so it runs before the stores below read their saved state.
+    private let migrated: Void = LegacyMigration.run()
     @State private var devices = DeviceManager()
     @State private var store = ProfileStore()
     @State private var engine = AudioEngine()
@@ -12,7 +14,7 @@ struct SoundStageApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("SoundStage") {
+        WindowGroup("iSound") {
             MainView()
                 .environment(devices)
                 .environment(store)

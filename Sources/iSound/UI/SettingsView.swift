@@ -40,7 +40,7 @@ struct CalibrationSettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Speaker calibration")
                     .font(.title3.weight(.semibold))
-                Text("Sit where you listen, keep the room quiet, and set a moderate volume. SoundStage plays a short sweep through each output five times, listens with the microphone, and measures how long each one takes to arrive. Outputs are then delayed to line up with the slowest (usually Bluetooth).")
+                Text("Sit where you listen, keep the room quiet, and set a moderate volume. iSound plays a short sweep through each output five times, listens with the microphone, and measures how long each one takes to arrive. Outputs are then delayed to line up with the slowest (usually Bluetooth).")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -215,7 +215,7 @@ struct CalibrationSettingsView: View {
         phase = .running(0)
         task = Task { @MainActor in
             guard await MicrophoneAccess.request() else {
-                phase = .failed("Microphone access is off. Allow SoundStage in System Settings → Privacy & Security → Microphone.")
+                phase = .failed("Microphone access is off. Allow iSound in System Settings → Privacy & Security → Microphone.")
                 return
             }
             engine.suspend()

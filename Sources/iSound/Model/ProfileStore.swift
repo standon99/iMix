@@ -13,7 +13,7 @@ final class ProfileStore {
 
     init() {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("SoundStage", isDirectory: true)
+            .appendingPathComponent("iSound", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("profile.json")
 

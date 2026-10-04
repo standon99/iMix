@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "SoundStage",
+    name: "iSound",
     platforms: [.macOS("14.2")],
     targets: [
         .executableTarget(
-            name: "SoundStage",
-            path: "Sources/SoundStage"
+            name: "iSound",
+            path: "Sources/iSound"
         )
     ]
 )
