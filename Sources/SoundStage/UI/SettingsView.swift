@@ -77,6 +77,14 @@ struct CalibrationSettingsView: View {
                     resultText(results[device.uid])
                 }
                 .width(min: 150)
+                TableColumn("Delay added") { device in
+                    if let delay = addedDelay(results[device.uid]) {
+                        Text(String(format: "%.1f ms", delay)).monospacedDigit()
+                    } else {
+                        Text("—").foregroundStyle(.tertiary)
+                    }
+                }
+                .width(80)
             }
 
             footer
@@ -147,6 +155,13 @@ struct CalibrationSettingsView: View {
         }
     }
 
+    /// How much the router will hold this output back so it lines up with the slowest one.
+    private func addedDelay(_ result: CalibrationResult?) -> Double? {
+        guard let latency = result?.latencyMs,
+              let slowest = results.values.compactMap(\.latencyMs).max() else { return nil }
+        return slowest - latency
+    }
+
     /// The mic itself may flip polarity, so only flag outputs that disagree with the others.
     private func isPolarityOutlier(_ result: CalibrationResult) -> Bool {
         let heard = results.values.filter { $0.latencyMs != nil }
@@ -172,8 +187,9 @@ struct CalibrationSettingsView: View {
                 ProgressView(value: progress).frame(maxWidth: 260)
                 Text("Measuring…").font(.caption).foregroundStyle(.secondary)
             case .done:
-                Text("Done. Apply to save these latencies and re-align the outputs.")
+                Text("With Bluetooth in the mix, macOS buffers the wired outputs too, so every time reads high. Only the differences matter: that's the delay added.")
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             case .failed(let message):
                 Text(message).font(.caption).foregroundStyle(Theme.danger).lineLimit(2)
             }

@@ -50,8 +50,10 @@ final class CalibrationRun {
         self.outputUIDs = outputUIDs
         self.micUID = micUID
 
-        // The mic is the clock; outputs get drift compensation.
-        let subDevices = [micUID] + outputUIDs.filter { $0 != micUID }
+        // Same outputs, order and clock as the router, with the mic added last, so the latencies
+        // measured here are the ones the router will actually see.
+        let ordered = AggregateDevice.routingOrder(outputUIDs)
+        let subDevices = ordered.contains(micUID) ? ordered : ordered + [micUID]
         let aggregate = try AggregateDevice(name: "SoundStage Calibration", subDeviceUIDs: subDevices, tapUUID: nil)
         self.aggregate = aggregate
         let sr = aggregate.sampleRate
@@ -368,7 +370,12 @@ enum CalibrationCommandLine {
             defer { engine.resume() }
             do {
                 try await Task.sleep(for: .milliseconds(300))
-                let run = try CalibrationRun(outputUIDs: outputs.map(\.uid), micUID: mic.uid)
+                var uids = outputs.map(\.uid)
+                if let o = args.firstIndex(of: "--outputs"), o + 1 < args.count {
+                    let wanted = args[o + 1].split(separator: ",").map(String.init)
+                    uids = uids.filter { uid in wanted.contains { uid.localizedCaseInsensitiveContains($0) } }
+                }
+                let run = try CalibrationRun(outputUIDs: uids, micUID: mic.uid)
                 let results = try await run.perform { _ in }
                 report["sampleRate"] = run.sampleRate
                 report["mic"] = mic.name

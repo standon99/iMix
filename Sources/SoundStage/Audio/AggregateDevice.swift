@@ -22,6 +22,20 @@ final class AggregateDevice {
 
     private var procID: AudioDeviceIOProcID?
 
+    /// Sub-device order shared by routing and calibration, so both build the same aggregate:
+    /// wired devices first (the first one is the clock), Bluetooth last, ties by UID.
+    static func routingOrder(_ uids: [String]) -> [String] {
+        func isBluetooth(_ uid: String) -> Bool {
+            guard let device = CoreAudioUtils.deviceID(forUID: uid) else { return false }
+            let transport = CoreAudioUtils.uint32(device, kAudioDevicePropertyTransportType)
+            return transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
+        }
+        return uids.sorted { a, b in
+            let ab = isBluetooth(a), bb = isBluetooth(b)
+            return ab != bb ? !ab : a < b
+        }
+    }
+
     /// `subDeviceUIDs[0]` is the clock; the rest get drift compensation.
     init(name: String, subDeviceUIDs: [String], tapUUID: UUID?) throws {
         precondition(!subDeviceUIDs.isEmpty)

@@ -81,13 +81,7 @@ final class AudioEngine {
     /// Outputs that have at least one clip and are connected, wired devices first so one of them is the clock.
     private var desiredOutputs: [String] {
         let used = Set(profile.clips.map(\.deviceUID))
-        return connected
-            .filter { used.contains($0.uid) }
-            .sorted { a, b in
-                let aw = a.transport != .bluetooth, bw = b.transport != .bluetooth
-                return aw != bw ? aw : a.uid < b.uid
-            }
-            .map(\.uid)
+        return AggregateDevice.routingOrder(connected.map(\.uid).filter(used.contains))
     }
 
     private func reconcile() {
