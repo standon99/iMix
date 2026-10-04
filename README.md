@@ -34,6 +34,12 @@ NO_LAUNCH=1 ./scripts/run.sh
 
 The script builds with SwiftPM, wraps the binary in an ad-hoc-signed `.app` (macOS only grants audio-capture and microphone permission to app bundles) and opens it. On first launch, allow **system audio recording**. Calibration will also ask for the **microphone**.
 
+To install a stable copy in `/Applications` (recommended if you turn on **Open iMix at login**, since `build/iMix.app` is recreated on every build):
+
+```sh
+./scripts/install.sh
+```
+
 To open the code in Xcode, open `Package.swift`.
 
 ## Using it
@@ -45,6 +51,7 @@ To open the code in Xcode, open `Package.swift`.
 3. **Turn on Route.** The captured audio is muted at its source and played through your clips. Turn it off and everything plays normally again. If iMix quits or crashes, the audio comes back by itself.
 4. **Calibrate** (Settings → Calibrate): sit where you listen, keep the room quiet, then Start → **Apply**. Recalibrate whenever you add or remove a Bluetooth speaker.
 5. **Equalizer:** switch to the Equalizer page. It applies while Route is on.
+6. **Settings → General:** turn on *Open iMix at login* to have it start with your Mac.
 
 ### Good to know
 
@@ -92,9 +99,10 @@ Sources/iMix/
             DeviceManager, CoreAudioUtils
   Model/    Profile (clips, devices, EQ), ProfileStore (edits + persistence)
   UI/       MainView, Toolbar, SpectrumEditorView + SpectrumCanvas (mixer), EqualizerView,
-            DeviceSticker, SettingsView (calibration), Theme
+            DeviceSticker, SettingsView (calibration), GeneralSettingsView (login item, About), Theme
 Resources/  Info.plist, Icon/ (icon-1024.png, AppIcon.icns)
-scripts/    run.sh (build + bundle + launch), make_icon.sh + make_icon.swift (icon)
+scripts/    run.sh (build + bundle + launch), install.sh (copy to /Applications),
+            make_icon.sh + make_icon.swift (icon)
 ```
 
 Settings and calibration are saved to `~/Library/Application Support/iMix/profile.json`.

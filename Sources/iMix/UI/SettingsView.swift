@@ -3,8 +3,12 @@ import SwiftUI
 struct SettingsView: View {
     var body: some View {
         TabView {
+            GeneralSettingsView()
+                .tabItem { Label("General", systemImage: "gearshape") }
             CalibrationSettingsView()
                 .tabItem { Label("Calibrate", systemImage: "waveform.badge.mic") }
+            AboutView()
+                .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 640, height: 500)
     }
