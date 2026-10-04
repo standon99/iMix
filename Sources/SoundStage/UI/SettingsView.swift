@@ -29,7 +29,9 @@ struct CalibrationSettingsView: View {
     @State private var results: [String: CalibrationResult] = [:]
     @State private var task: Task<Void, Never>?
 
-    private var mic = MicrophoneAccess.defaultMic()
+    @State private var mics: [MicrophoneAccess.Mic] = []
+    @State private var micUID: String?
+    private var mic: MicrophoneAccess.Mic? { mics.first { $0.uid == micUID } }
     private var selected: [String] { devices.outputs.map(\.uid).filter { !excluded.contains($0) } }
     private var isRunning: Bool { if case .running = phase { true } else { false } }
 
@@ -80,24 +82,38 @@ struct CalibrationSettingsView: View {
             footer
         }
         .padding(20)
+        .onAppear(perform: loadMics)
+        .onChange(of: devices.outputs) { loadMics() }
         .onDisappear { cancel() }
     }
 
     @ViewBuilder
     private var micRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: "mic")
-            if let mic {
-                Text("Listening with \(mic.name)")
-                if mic.transport == .bluetooth {
-                    Text("· Bluetooth mics add their own delay and lower quality; a built-in or USB mic is better.")
+            if mics.isEmpty {
+                Text("No microphone found").foregroundStyle(Theme.danger)
+            } else {
+                Picker("Listen with", selection: $micUID) {
+                    ForEach(mics) { mic in
+                        Text(mic.name).tag(Optional(mic.uid))
+                    }
+                }
+                .fixedSize()
+                .disabled(isRunning)
+                if mic?.transport == .bluetooth {
+                    Text("Bluetooth mics add their own delay; the Mac's mic is better.")
                         .foregroundStyle(.orange)
                 }
-            } else {
-                Text("No microphone found").foregroundStyle(Theme.danger)
             }
         }
         .font(.callout)
+    }
+
+    /// Refreshes the mic list, keeping the current choice if it's still connected.
+    private func loadMics() {
+        mics = MicrophoneAccess.inputDevices()
+        if mic == nil { micUID = MicrophoneAccess.preferredMic(from: mics)?.uid }
     }
 
     @ViewBuilder

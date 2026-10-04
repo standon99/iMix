@@ -312,19 +312,39 @@ enum MicrophoneAccess {
         }
     }
 
-    /// The system's default input device, which calibration listens with.
-    static func defaultMic() -> (uid: String, name: String, transport: Transport)? {
-        guard let device = CoreAudioUtils.defaultDevice(kAudioHardwarePropertyDefaultInputDevice),
-              let uid = CoreAudioUtils.string(device, kAudioDevicePropertyDeviceUID),
-              let name = CoreAudioUtils.string(device, kAudioObjectPropertyName) else { return nil }
+    struct Mic: Identifiable, Hashable {
+        let uid: String
+        let name: String
         let transport: Transport
-        switch CoreAudioUtils.uint32(device, kAudioDevicePropertyTransportType) {
-        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE: transport = .bluetooth
-        case kAudioDeviceTransportTypeBuiltIn: transport = .builtIn
-        case kAudioDeviceTransportTypeUSB: transport = .usb
-        default: transport = .other
+        var id: String { uid }
+    }
+
+    /// Every input device except aggregates and virtual devices.
+    static func inputDevices() -> [Mic] {
+        CoreAudioUtils.objectList(CoreAudioUtils.system, kAudioHardwarePropertyDevices).compactMap { device in
+            guard !CoreAudioUtils.bufferChannelCounts(device, scope: kAudioObjectPropertyScopeInput).isEmpty,
+                  let uid = CoreAudioUtils.string(device, kAudioDevicePropertyDeviceUID),
+                  let name = CoreAudioUtils.string(device, kAudioObjectPropertyName) else { return nil }
+            let transport: Transport
+            switch CoreAudioUtils.uint32(device, kAudioDevicePropertyTransportType) {
+            case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE: transport = .bluetooth
+            case kAudioDeviceTransportTypeBuiltIn: transport = .builtIn
+            case kAudioDeviceTransportTypeUSB: transport = .usb
+            case kAudioDeviceTransportTypeVirtual, kAudioDeviceTransportTypeAggregate, kAudioDeviceTransportTypeAutoAggregate:
+                return nil
+            default: transport = .other
+            }
+            return Mic(uid: uid, name: name, transport: transport)
         }
-        return (uid, name, transport)
+    }
+
+    /// The Mac's built-in mic if present, then USB, then anything that isn't Bluetooth. A Bluetooth
+    /// speaker's mic would add its own delay and force the speaker into low-quality call mode.
+    static func preferredMic(from mics: [Mic]) -> Mic? {
+        mics.first { $0.transport == .builtIn }
+            ?? mics.first { $0.transport == .usb }
+            ?? mics.first { $0.transport != .bluetooth }
+            ?? mics.first
     }
 }
 
@@ -338,7 +358,8 @@ enum CalibrationCommandLine {
         let path = args[flag + 1]
         Task { @MainActor in
             var report: [String: Any] = [:]
-            guard await MicrophoneAccess.request(), let mic = MicrophoneAccess.defaultMic() else {
+            guard await MicrophoneAccess.request(),
+                  let mic = MicrophoneAccess.preferredMic(from: MicrophoneAccess.inputDevices()) else {
                 report["error"] = "no microphone access"
                 write(report, to: path)
                 return
