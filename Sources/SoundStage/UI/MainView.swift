@@ -24,6 +24,9 @@ struct MainView: View {
                 CaptureStatus()
             }
             ToolbarItem(placement: .primaryAction) {
+                CaptureModePicker()
+            }
+            ToolbarItem(placement: .primaryAction) {
                 RoutingToggle()
             }
             ToolbarItem(placement: .primaryAction) {
@@ -91,22 +94,23 @@ struct CaptureStatus: View {
 
     private var status: (color: Color, text: String) {
         let green = Color(hex: 0x1ED760)
+        let outputs = engine.routedOutputs.count
+        let outputsText = "\(outputs) output\(outputs == 1 ? "" : "s")"
         switch engine.source {
         case .starting: return (Theme.textTertiary, "Starting…")
         case .suspended: return (Theme.textTertiary, "Paused for calibration")
         case .failed(let message): return (Theme.danger, "Audio error: \(message)")
-        case .system:
-            return (Theme.accent, engine.routingEnabled
-                    ? "Waiting for Spotify · showing system audio"
-                    : "Spotify not open · showing system audio")
-        case .spotify:
+        case .system, .spotify:
+            let what = engine.source == .spotify ? "Spotify" : "all audio"
             if engine.routingActive {
-                return engine.routedOutputs.isEmpty
-                    ? (Theme.danger, "Routing Spotify · no outputs on the timeline (silent)")
-                    : (green, "Routing Spotify to \(engine.routedOutputs.count) output\(engine.routedOutputs.count == 1 ? "" : "s")")
+                return outputs == 0
+                    ? (Theme.danger, "Routing \(what) · no outputs on the timeline (silent)")
+                    : (green, "Routing \(what) to \(outputsText)")
             }
-            return (engine.spotifyPlaying ? green : green.opacity(0.5),
-                    engine.spotifyPlaying ? "Listening to Spotify · playing normally" : "Spotify paused")
+            if engine.routingEnabled && engine.captureMode == .spotify {
+                return (Theme.accent, "Waiting for Spotify · showing all audio")
+            }
+            return (Theme.accent, "Listening to \(what) · playing normally")
         }
     }
 
@@ -121,7 +125,7 @@ struct CaptureStatus: View {
     }
 }
 
-/// Turns routing on/off: on mutes Spotify's normal output and plays it through the timeline.
+/// Turns routing on/off: on mutes the captured audio's normal output and plays it through the timeline.
 struct RoutingToggle: View {
     @Environment(AudioEngine.self) private var engine
 
@@ -136,6 +140,21 @@ struct RoutingToggle: View {
                 .labelsHidden()
         }
         .controlSize(.small)
-        .help("On: Spotify plays through the outputs on the timeline, split by frequency. Off: Spotify plays normally.")
+        .help("On: audio plays through the outputs on the timeline, split by frequency. Off: audio plays normally.")
+    }
+}
+
+/// Chooses whether SoundStage captures and routes everything the Mac plays, or only Spotify.
+struct CaptureModePicker: View {
+    @Environment(AudioEngine.self) private var engine
+
+    var body: some View {
+        @Bindable var engine = engine
+        Picker("Source", selection: $engine.captureMode) {
+            ForEach(AudioEngine.CaptureMode.allCases) { Text($0.label).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .fixedSize()
+        .help("All audio: everything the Mac plays. Spotify: only Spotify; everything else plays normally.")
     }
 }

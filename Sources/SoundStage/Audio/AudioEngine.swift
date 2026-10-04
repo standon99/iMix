@@ -2,10 +2,17 @@ import CoreAudio
 import Foundation
 import Observation
 
-/// Owns the live audio session: taps Spotify (or all system audio), feeds the spectrum, and when
-/// routing is on, mutes Spotify at the source and plays each clip through its output.
+/// Owns the live audio session: taps all system audio (or just Spotify), feeds the spectrum, and when
+/// routing is on, mutes that audio at the source and plays each clip through its output.
 @Observable
 final class AudioEngine {
+    /// What gets captured and routed.
+    enum CaptureMode: String, CaseIterable, Identifiable {
+        case allAudio, spotify
+        var id: String { rawValue }
+        var label: String { self == .allAudio ? "All audio" : "Spotify" }
+    }
+
     enum Source: Equatable {
         case starting
         case spotify
@@ -16,9 +23,16 @@ final class AudioEngine {
 
     private(set) var source: Source = .starting
     private(set) var spotifyPlaying = false
-    /// True when Spotify is being muted and re-played through the clip outputs.
+    /// True when the captured audio is being muted and re-played through the clip outputs.
     private(set) var routingActive = false
     private(set) var routedOutputs: [String] = []
+
+    var captureMode: CaptureMode = CaptureMode(rawValue: UserDefaults.standard.string(forKey: "captureMode") ?? "") ?? .allAudio {
+        didSet {
+            UserDefaults.standard.set(captureMode.rawValue, forKey: "captureMode")
+            reconcile()
+        }
+    }
 
     var routingEnabled: Bool = UserDefaults.standard.bool(forKey: "routingEnabled") {
         didSet {
@@ -30,6 +44,7 @@ final class AudioEngine {
     @ObservationIgnored let feed = LiveSpectrumFeed()
     @ObservationIgnored private var session: Session?
     @ObservationIgnored private var spotifyProcesses: [AudioObjectID] = []
+    @ObservationIgnored private var ownProcess: AudioObjectID?
     @ObservationIgnored private var profile = Profile()
     @ObservationIgnored private var connected: [OutputDevice] = []
     @ObservationIgnored private var timer: Timer?
@@ -70,8 +85,11 @@ final class AudioEngine {
         let processes = CoreAudioUtils.processObjects(bundlePrefix: Self.spotifyBundlePrefix)
         let playing = processes.contains(where: CoreAudioUtils.isRunningOutput)
         if playing != spotifyPlaying { spotifyPlaying = playing }
-        if processes != spotifyProcesses {
+        // SoundStage's own process object can appear only after it first touches audio.
+        let own = CoreAudioUtils.ownProcessObject()
+        if processes != spotifyProcesses || own != ownProcess {
             spotifyProcesses = processes
+            ownProcess = own
             reconcile()
         }
     }
@@ -86,9 +104,13 @@ final class AudioEngine {
 
     private func reconcile() {
         guard !suspended else { return }
-        let routing = routingEnabled && !spotifyProcesses.isEmpty
+        let tapSpotify = captureMode == .spotify && !spotifyProcesses.isEmpty
+        // A whole-system tap must leave SoundStage out, or routing would re-capture its own output.
+        let canRoute = captureMode == .spotify ? tapSpotify : ownProcess != nil
+        let routing = routingEnabled && canRoute
         let key = Session.Key(
-            processes: spotifyProcesses,
+            processes: tapSpotify ? spotifyProcesses : [],
+            excluded: ownProcess.map { [$0] } ?? [],
             routing: routing,
             outputs: routing ? desiredOutputs : [])
 
@@ -105,7 +127,7 @@ final class AudioEngine {
             feed.sampleRate = newSession.sampleRate
             routingActive = routing
             routedOutputs = key.outputs
-            source = spotifyProcesses.isEmpty ? .system : .spotify
+            source = tapSpotify ? .spotify : .system
             publishSnapshots()
         } catch {
             routingActive = false
@@ -144,7 +166,9 @@ final class AudioEngine {
 /// devices or the tapped processes change; clip and sticker edits are pushed into its router live.
 private final class Session {
     struct Key: Equatable {
+        /// Empty = whole system.
         var processes: [AudioObjectID]
+        var excluded: [AudioObjectID]
         var routing: Bool
         var outputs: [String]
     }
@@ -164,7 +188,7 @@ private final class Session {
     init(key: Key, ring: SampleRing) throws {
         self.key = key
         self.ring = ring
-        tap = try ProcessTap(processes: key.processes, muted: key.routing)
+        tap = try ProcessTap(processes: key.processes, excluding: key.excluded, muted: key.routing)
 
         var subDevices = key.outputs
         if subDevices.isEmpty {

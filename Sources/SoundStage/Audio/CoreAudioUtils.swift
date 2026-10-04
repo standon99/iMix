@@ -84,6 +84,17 @@ enum CoreAudioUtils {
             .sorted()
     }
 
+    /// SoundStage's own process object, so a whole-system tap can leave out what SoundStage itself plays
+    /// (otherwise routing would capture its own output and feed back).
+    static func ownProcessObject() -> AudioObjectID? {
+        var addr = address(kAudioHardwarePropertyTranslatePIDToProcessObject)
+        var pid = getpid()
+        var object = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = AudioObjectGetPropertyData(system, &addr, UInt32(MemoryLayout<pid_t>.size), &pid, &size, &object)
+        return status == noErr && object != kAudioObjectUnknown ? object : nil
+    }
+
     static func isRunningOutput(_ process: AudioObjectID) -> Bool {
         (uint32(process, kAudioProcessPropertyIsRunningOutput) ?? 0) != 0
     }

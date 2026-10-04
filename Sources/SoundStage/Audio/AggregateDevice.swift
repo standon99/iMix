@@ -107,14 +107,15 @@ final class AggregateDevice {
     }
 }
 
-/// A Core Audio process tap on a set of processes (or the whole system when empty).
+/// A Core Audio process tap on a set of processes, or on the whole system.
 final class ProcessTap {
     let id: AudioObjectID
     let uuid: UUID
 
-    init(processes: [AudioObjectID], muted: Bool) throws {
+    /// Empty `processes` taps the whole system except `excluding`.
+    init(processes: [AudioObjectID], excluding: [AudioObjectID], muted: Bool) throws {
         let description = processes.isEmpty
-            ? CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+            ? CATapDescription(stereoGlobalTapButExcludeProcesses: excluding)
             : CATapDescription(stereoMixdownOfProcesses: processes)
         description.uuid = UUID()
         description.name = "SoundStage"
