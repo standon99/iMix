@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>SoundStage</string>
+    <key>CFBundleDisplayName</key><string>SoundStage</string>
+    <key>CFBundleIdentifier</key><string>local.soundstage.app</string>
+    <key>CFBundleExecutable</key><string>SoundStage</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>14.2</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>SoundStage listens to test sweeps through the microphone to measure each speaker's latency during calibration.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>SoundStage captures Spotify's audio so it can split it across your speakers.</string>
+</dict>
+</plist>
