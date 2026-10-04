@@ -50,7 +50,7 @@ enum Transport: String, Codable {
     case builtIn, bluetooth, usb, hdmi, virtual, other
 }
 
-struct Profile: Codable {
+struct Profile: Codable, Equatable {
     var clips: [Clip] = []
     var devices: [String: DeviceSettings] = [:]
 }

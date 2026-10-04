@@ -3,21 +3,28 @@ import SwiftUI
 struct MainView: View {
     @Environment(DeviceManager.self) private var devices
     @Environment(ProfileStore.self) private var store
-    @Environment(CaptureController.self) private var capture
+    @Environment(AudioEngine.self) private var engine
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SpectrumEditorView(feed: capture.feed)
+            SpectrumEditorView(feed: engine.feed)
             OutputShelf()
         }
         .padding(16)
         .background(Theme.background)
         .onChange(of: devices.outputs, initial: true) { _, outputs in
             store.register(outputs)
+            engine.update(profile: store.profile, connected: outputs)
+        }
+        .onChange(of: store.profile) { _, profile in
+            engine.update(profile: profile, connected: devices.outputs)
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 CaptureStatus()
+            }
+            ToolbarItem(placement: .primaryAction) {
+                RoutingToggle()
             }
             ToolbarItem(placement: .primaryAction) {
                 SettingsLink {
@@ -77,17 +84,29 @@ struct OutputShelf: View {
     }
 }
 
-/// Shows what the spectrum is listening to.
+/// Shows what the spectrum is listening to and whether audio is being routed.
 struct CaptureStatus: View {
-    @Environment(CaptureController.self) private var capture
+    @Environment(AudioEngine.self) private var engine
+    @Environment(ProfileStore.self) private var store
 
     private var status: (color: Color, text: String) {
-        switch capture.source {
-        case .starting: (Theme.textTertiary, "Starting capture…")
-        case .spotify where capture.spotifyPlaying: (Color(hex: 0x1ED760), "Listening to Spotify")
-        case .spotify: (Color(hex: 0x1ED760).opacity(0.5), "Spotify open · paused")
-        case .system: (Theme.accent, "Spotify not open · showing all system audio")
-        case .failed(let message): (Theme.danger, "Capture failed: \(message)")
+        let green = Color(hex: 0x1ED760)
+        switch engine.source {
+        case .starting: return (Theme.textTertiary, "Starting…")
+        case .suspended: return (Theme.textTertiary, "Paused for calibration")
+        case .failed(let message): return (Theme.danger, "Audio error: \(message)")
+        case .system:
+            return (Theme.accent, engine.routingEnabled
+                    ? "Waiting for Spotify · showing system audio"
+                    : "Spotify not open · showing system audio")
+        case .spotify:
+            if engine.routingActive {
+                return engine.routedOutputs.isEmpty
+                    ? (Theme.danger, "Routing Spotify · no outputs on the timeline (silent)")
+                    : (green, "Routing Spotify to \(engine.routedOutputs.count) output\(engine.routedOutputs.count == 1 ? "" : "s")")
+            }
+            return (engine.spotifyPlaying ? green : green.opacity(0.5),
+                    engine.spotifyPlaying ? "Listening to Spotify · playing normally" : "Spotify paused")
         }
     }
 
@@ -97,9 +116,26 @@ struct CaptureStatus: View {
             Text(status.text)
                 .font(.callout)
                 .foregroundStyle(Theme.textSecondary)
-            Text("· routing not connected yet")
-                .font(.callout)
-                .foregroundStyle(Theme.textTertiary)
+                .lineLimit(1)
         }
+    }
+}
+
+/// Turns routing on/off: on mutes Spotify's normal output and plays it through the timeline.
+struct RoutingToggle: View {
+    @Environment(AudioEngine.self) private var engine
+
+    var body: some View {
+        @Bindable var engine = engine
+        HStack(spacing: 6) {
+            Text("Route")
+                .font(.callout)
+                .foregroundStyle(Theme.textSecondary)
+            Toggle("Route", isOn: $engine.routingEnabled)
+                .toggleStyle(.switch)
+                .labelsHidden()
+        }
+        .controlSize(.small)
+        .help("On: Spotify plays through the outputs on the timeline, split by frequency. Off: Spotify plays normally.")
     }
 }
