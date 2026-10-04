@@ -185,7 +185,7 @@ struct CalibrationSettingsView: View {
         HStack(spacing: 12) {
             switch phase {
             case .idle:
-                Text("Takes about \(Int(CalibrationRun.totalSeconds(selected.count).rounded())) s. Pause Spotify first.")
+                Text("Takes about \(Int(CalibrationRun.totalSeconds(selected.count).rounded())) s. Pause anything that's playing first.")
                     .font(.caption).foregroundStyle(.secondary)
             case .running(let progress):
                 ProgressView(value: progress).frame(maxWidth: 260)

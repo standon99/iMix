@@ -23,15 +23,19 @@ final class AggregateDevice {
     private var procID: AudioDeviceIOProcID?
 
     /// Bluetooth speakers crackle when the aggregate has to resample them from a different rate while
-    /// also chasing their drifting clock. When one is involved, move the wired outputs to its rate (so
-    /// only small drift corrections remain) and use a larger IO buffer for more slack.
+    /// also chasing their drifting clock. When any Bluetooth output is involved, temporarily move the
+    /// other outputs to its rate (so only small drift corrections remain) and use a larger IO buffer.
+    /// Without Bluetooth, any rates changed earlier are put back.
     /// Returns the IO buffer size to use. Shared by routing and calibration so their latencies match.
     static func prepareForBluetooth(_ uids: [String]) -> UInt32? {
         let devices = uids.compactMap(CoreAudioUtils.deviceID(forUID:))
         guard let bluetooth = devices.first(where: CoreAudioUtils.isBluetooth),
-              let rate = CoreAudioUtils.float64(bluetooth, kAudioDevicePropertyNominalSampleRate) else { return nil }
+              let rate = CoreAudioUtils.float64(bluetooth, kAudioDevicePropertyNominalSampleRate) else {
+            SampleRateChanges.restoreAll()
+            return nil
+        }
         for device in devices where !CoreAudioUtils.isBluetooth(device) {
-            CoreAudioUtils.setSampleRate(device, rate)
+            SampleRateChanges.set(device, to: rate)
         }
         return 1024
     }
@@ -149,5 +153,27 @@ final class ProcessTap {
 
     deinit {
         AudioHardwareDestroyProcessTap(id)
+    }
+}
+
+/// Sample rates iMix changed, so they can be put back: the user's devices should be left as they were
+/// once routing stops or the app quits. Main thread only.
+enum SampleRateChanges {
+    /// Device UID → rate before iMix first changed it.
+    private static var originals: [String: Double] = [:]
+
+    static func set(_ device: AudioDeviceID, to rate: Double) {
+        guard let uid = CoreAudioUtils.string(device, kAudioDevicePropertyDeviceUID),
+              let current = CoreAudioUtils.float64(device, kAudioDevicePropertyNominalSampleRate),
+              current != rate else { return }
+        if originals[uid] == nil { originals[uid] = current }
+        CoreAudioUtils.setSampleRate(device, rate)
+    }
+
+    static func restoreAll() {
+        for (uid, rate) in originals {
+            if let device = CoreAudioUtils.deviceID(forUID: uid) { CoreAudioUtils.setSampleRate(device, rate) }
+        }
+        originals = [:]
     }
 }

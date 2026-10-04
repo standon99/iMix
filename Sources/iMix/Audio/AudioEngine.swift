@@ -83,6 +83,11 @@ final class AudioEngine {
 
     func start() {
         guard appTimer == nil else { return }
+        // Leave the user's devices as we found them.
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.session = nil
+            SampleRateChanges.restoreAll()
+        }
         refreshApps()
         refreshVolume()
         // Apps start and stop playing at any time; re-check every couple of seconds.
@@ -369,7 +374,13 @@ private final class Session {
             }
             subDevices = [uid]
         }
-        let bufferFrames = key.routing ? AggregateDevice.prepareForBluetooth(subDevices) : nil
+        let bufferFrames: UInt32?
+        if key.routing {
+            bufferFrames = AggregateDevice.prepareForBluetooth(subDevices)
+        } else {
+            SampleRateChanges.restoreAll()
+            bufferFrames = nil
+        }
         aggregate = try AggregateDevice(name: "iMix", subDeviceUIDs: subDevices, tapUUID: tap.uuid)
         if let bufferFrames { aggregate.setBufferFrameSize(bufferFrames) }
 

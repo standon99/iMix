@@ -56,7 +56,7 @@ To open the code in Xcode, open `Package.swift`.
 ### Good to know
 
 - With a Bluetooth speaker routed, **everything is delayed by roughly 0.4 s** so the speakers stay in sync. That's fine for music, but video will be out of lip-sync. For video, remove the Bluetooth clip or use Route only for your music app.
-- When a Bluetooth speaker is routed, iMix sets your wired outputs to the Bluetooth speaker's sample rate (usually 44.1 kHz) to avoid crackling. This changes those devices' setting in macOS, and it stays changed after iMix quits.
+- When a Bluetooth speaker is routed, iMix temporarily sets your other outputs to the Bluetooth speaker's sample rate (usually 44.1 kHz) to avoid crackling. The original rates are put back when routing stops or iMix quits (but not if it crashes; fix that in Audio MIDI Setup).
 - The volume keys only work when the Mac's sound output is a real device. Multi-Output Devices have no volume control. iMix doesn't need a Multi-Output or Aggregate device; it creates its own private one.
 
 ## How it works
