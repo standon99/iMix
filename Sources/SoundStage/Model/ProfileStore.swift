@@ -126,6 +126,22 @@ final class ProfileStore {
         }
     }
 
+    // MARK: Equalizer
+
+    func setEQGain(_ band: Int, _ gain: Double) {
+        guard profile.eq.gains.indices.contains(band) else { return }
+        profile.eq.gains[band] = min(max(gain, EQBands.range.lowerBound), EQBands.range.upperBound)
+    }
+
+    func setEQGains(_ gains: [Double]) {
+        guard gains.count == EQBands.centers.count else { return }
+        profile.eq.gains = gains
+    }
+
+    func setEQEnabled(_ enabled: Bool) {
+        profile.eq.enabled = enabled
+    }
+
     // MARK: Devices
 
     /// Records newly seen devices so they keep a stable colour and settings while disconnected.

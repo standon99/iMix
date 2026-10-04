@@ -1,35 +1,43 @@
+import AppKit
+import AudioToolbox
 import CoreAudio
 import Foundation
 import Observation
 
-/// Owns the live audio session: taps all system audio (or just Spotify), feeds the spectrum, and when
-/// routing is on, mutes that audio at the source and plays each clip through its output.
+/// A running app the user can choose to capture, with the Core Audio processes that play its sound.
+struct AudioApp: Identifiable, Equatable {
+    let bundleID: String
+    let name: String
+    let processes: [AudioObjectID]
+    let playing: Bool
+    var id: String { bundleID }
+}
+
+/// Owns the live audio session: taps all system audio (or chosen apps), feeds the spectrum, and when
+/// routing is on, mutes that audio at the source and plays it through the timeline's outputs.
 @Observable
 final class AudioEngine {
-    /// What gets captured and routed.
-    enum CaptureMode: String, CaseIterable, Identifiable {
-        case allAudio, spotify
-        var id: String { rawValue }
-        var label: String { self == .allAudio ? "All audio" : "Spotify" }
-    }
-
     enum Source: Equatable {
         case starting
-        case spotify
-        case system
+        case allAudio
+        case apps
+        /// Specific apps are selected but none of them has audio running yet.
+        case waitingForApps
         case suspended
         case failed(String)
     }
 
     private(set) var source: Source = .starting
-    private(set) var spotifyPlaying = false
     /// True when the captured audio is being muted and re-played through the clip outputs.
     private(set) var routingActive = false
     private(set) var routedOutputs: [String] = []
+    /// Regular apps that are running, playing ones first.
+    private(set) var runningApps: [AudioApp] = []
 
-    var captureMode: CaptureMode = CaptureMode(rawValue: UserDefaults.standard.string(forKey: "captureMode") ?? "") ?? .allAudio {
+    /// Bundle IDs to capture; empty means all audio.
+    var selectedApps: [String] = UserDefaults.standard.stringArray(forKey: "selectedApps") ?? [] {
         didSet {
-            UserDefaults.standard.set(captureMode.rawValue, forKey: "captureMode")
+            UserDefaults.standard.set(selectedApps, forKey: "selectedApps")
             reconcile()
         }
     }
@@ -41,27 +49,53 @@ final class AudioEngine {
         }
     }
 
+    // MARK: Master volume
+    // Follows the volume of the Mac's current output device, which is what the keyboard volume keys
+    // change. That device already gets the change in hardware; every other output gets it in software.
+
+    private(set) var masterVolume: Double = 1
+    private(set) var masterMuted = false
+    /// False when the current output (e.g. a Multi-Output Device) has no volume the keys can change.
+    private(set) var masterFollowsKeys = false
+    @ObservationIgnored private var appVolume: Double = UserDefaults.standard.object(forKey: "appVolume") as? Double ?? 1
+
+    func setMasterVolume(_ value: Double) {
+        let v = min(max(value, 0), 1)
+        if masterFollowsKeys, let device = CoreAudioUtils.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) {
+            MasterVolume.set(Float32(v), on: device)
+        } else {
+            appVolume = v
+            UserDefaults.standard.set(v, forKey: "appVolume")
+        }
+        masterVolume = v
+        publishSnapshots()
+    }
+
     @ObservationIgnored let feed = LiveSpectrumFeed()
     @ObservationIgnored private var session: Session?
-    @ObservationIgnored private var spotifyProcesses: [AudioObjectID] = []
     @ObservationIgnored private var ownProcess: AudioObjectID?
     @ObservationIgnored private var profile = Profile()
     @ObservationIgnored private var connected: [OutputDevice] = []
-    @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var appTimer: Timer?
+    @ObservationIgnored private var volumeTimer: Timer?
     @ObservationIgnored private var suspended = false
-
-    static let spotifyBundlePrefix = "com.spotify.client"
+    @ObservationIgnored private var defaultOutputUID: String?
 
     func start() {
-        guard timer == nil else { return }
-        refreshSpotify()
-        // Spotify can launch or quit at any time; re-check every couple of seconds.
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            self?.refreshSpotify()
+        guard appTimer == nil else { return }
+        refreshApps()
+        refreshVolume()
+        // Apps start and stop playing at any time; re-check every couple of seconds.
+        appTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.refreshApps()
+        }
+        // Volume keys: poll often enough to feel immediate.
+        volumeTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.refreshVolume()
         }
     }
 
-    /// Called whenever clips, sticker settings or connected devices change.
+    /// Called whenever clips, sticker settings, the EQ or connected devices change.
     func update(profile: Profile, connected: [OutputDevice]) {
         self.profile = profile
         self.connected = connected
@@ -81,17 +115,39 @@ final class AudioEngine {
         reconcile()
     }
 
-    private func refreshSpotify() {
-        let processes = CoreAudioUtils.processObjects(bundlePrefix: Self.spotifyBundlePrefix)
-        let playing = processes.contains(where: CoreAudioUtils.isRunningOutput)
-        if playing != spotifyPlaying { spotifyPlaying = playing }
+    func toggleApp(_ bundleID: String) {
+        if let i = selectedApps.firstIndex(of: bundleID) {
+            selectedApps.remove(at: i)
+        } else {
+            selectedApps.append(bundleID)
+        }
+    }
+
+    // MARK: Polling
+
+    private func refreshApps() {
+        let apps = AppDiscovery.runningApps()
+        if apps != runningApps { runningApps = apps }
+
         // SoundStage's own process object can appear only after it first touches audio.
         let own = CoreAudioUtils.ownProcessObject()
-        if processes != spotifyProcesses || own != ownProcess {
-            spotifyProcesses = processes
-            ownProcess = own
-            reconcile()
-        }
+        if own != ownProcess { ownProcess = own }
+        reconcile()
+    }
+
+    private func refreshVolume() {
+        guard let device = CoreAudioUtils.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) else { return }
+        let uid = CoreAudioUtils.string(device, kAudioDevicePropertyDeviceUID)
+        let followsKeys = MasterVolume.isAvailable(on: device)
+        let volume = followsKeys ? Double(MasterVolume.get(on: device) ?? 1) : appVolume
+        let muted = followsKeys && MasterVolume.isMuted(device)
+
+        var changed = false
+        if uid != defaultOutputUID { defaultOutputUID = uid; changed = true }
+        if followsKeys != masterFollowsKeys { masterFollowsKeys = followsKeys; changed = true }
+        if abs(volume - masterVolume) > 0.001 { masterVolume = volume; changed = true }
+        if muted != masterMuted { masterMuted = muted; changed = true }
+        if changed { publishSnapshots() }
     }
 
     // MARK: Session management
@@ -104,17 +160,24 @@ final class AudioEngine {
 
     private func reconcile() {
         guard !suspended else { return }
-        let tapSpotify = captureMode == .spotify && !spotifyProcesses.isEmpty
+        let selectedProcesses = runningApps
+            .filter { selectedApps.contains($0.bundleID) }
+            .flatMap(\.processes)
+            .sorted()
+        let wantsApps = !selectedApps.isEmpty
+        let tapApps = wantsApps && !selectedProcesses.isEmpty
         // A whole-system tap must leave SoundStage out, or routing would re-capture its own output.
-        let canRoute = captureMode == .spotify ? tapSpotify : ownProcess != nil
+        let canRoute = wantsApps ? tapApps : ownProcess != nil
         let routing = routingEnabled && canRoute
         let key = Session.Key(
-            processes: tapSpotify ? spotifyProcesses : [],
+            processes: tapApps ? selectedProcesses : [],
             excluded: ownProcess.map { [$0] } ?? [],
             routing: routing,
             outputs: routing ? desiredOutputs : [])
 
+        let newSource: Source = tapApps ? .apps : (wantsApps ? .waitingForApps : .allAudio)
         if let session, session.key == key {
+            if source != newSource { source = newSource }
             publishSnapshots()
             return
         }
@@ -127,7 +190,7 @@ final class AudioEngine {
             feed.sampleRate = newSession.sampleRate
             routingActive = routing
             routedOutputs = key.outputs
-            source = tapSpotify ? .spotify : .system
+            source = newSource
             publishSnapshots()
         } catch {
             routingActive = false
@@ -142,6 +205,8 @@ final class AudioEngine {
 
         let latencies = session.key.outputs.compactMap { profile.devices[$0]?.latencyMs }
         let slowest = latencies.max() ?? 0
+        // Squared so sliders feel closer to perceived loudness.
+        let master = masterMuted ? 0 : Float(masterVolume * masterVolume)
 
         var snapshots: [String: DeviceSnapshot] = [:]
         for uid in session.key.outputs {
@@ -149,8 +214,9 @@ final class AudioEngine {
             let clips = profile.clips
                 .filter { $0.deviceUID == uid }
                 .map { DeviceSnapshot.ClipRange(id: $0.id, lower: $0.lower, upper: $0.upper) }
-            // Squared so the slider feels closer to perceived loudness.
-            let gain = settings.muted ? 0 : Float(settings.masterVolume * settings.masterVolume)
+            // The current output device already gets the master volume in hardware.
+            let masterGain: Float = (masterFollowsKeys && uid == defaultOutputUID) ? 1 : master
+            let gain = settings.muted ? 0 : Float(settings.masterVolume * settings.masterVolume) * masterGain
             let delayMs = settings.latencyMs.map { slowest - $0 } ?? 0
             snapshots[uid] = DeviceSnapshot(
                 mode: settings.channel,
@@ -158,7 +224,73 @@ final class AudioEngine {
                 delaySamples: Int((delayMs / 1000 * sampleRate).rounded()),
                 clips: clips)
         }
-        router.publish(snapshots)
+        router.publish(snapshots, eq: EQSnapshot(profile.eq))
+    }
+}
+
+/// The "virtual main volume" the keyboard volume keys control.
+enum MasterVolume {
+    private static var volumeAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+        mScope: kAudioDevicePropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain)
+
+    static func isAvailable(on device: AudioDeviceID) -> Bool {
+        guard AudioHardwareServiceHasProperty(device, &volumeAddress) else { return false }
+        var settable: DarwinBoolean = false
+        return AudioHardwareServiceIsPropertySettable(device, &volumeAddress, &settable) == noErr && settable.boolValue
+    }
+
+    static func get(on device: AudioDeviceID) -> Float32? {
+        var value: Float32 = 0
+        var size = UInt32(MemoryLayout<Float32>.size)
+        return AudioHardwareServiceGetPropertyData(device, &volumeAddress, 0, nil, &size, &value) == noErr ? value : nil
+    }
+
+    static func set(_ value: Float32, on device: AudioDeviceID) {
+        var v = value
+        AudioHardwareServiceSetPropertyData(device, &volumeAddress, 0, nil, UInt32(MemoryLayout<Float32>.size), &v)
+    }
+
+    static func isMuted(_ device: AudioDeviceID) -> Bool {
+        (CoreAudioUtils.uint32(device, kAudioDevicePropertyMute, scope: kAudioDevicePropertyScopeOutput) ?? 0) != 0
+    }
+}
+
+/// Matches Core Audio process objects to the regular apps that own them.
+enum AppDiscovery {
+    static func runningApps() -> [AudioApp] {
+        let ownBundle = Bundle.main.bundleIdentifier
+        let regular = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.bundleIdentifier != ownBundle
+        }
+        let safari = regular.first { $0.bundleIdentifier == "com.apple.Safari" }
+
+        var processes: [String: [AudioObjectID]] = [:]
+        var playing: Set<String> = []
+        for object in CoreAudioUtils.objectList(CoreAudioUtils.system, kAudioHardwarePropertyProcessObjectList) {
+            let bundleID = CoreAudioUtils.string(object, kAudioProcessPropertyBundleID) ?? ""
+            let pid = pid_t(bitPattern: CoreAudioUtils.uint32(object, kAudioProcessPropertyPID) ?? 0)
+            // Same process, else a helper whose bundle ID extends the app's (Chrome, Electron apps),
+            // else Safari's shared WebKit media process.
+            let owner = regular.first { $0.processIdentifier == pid }
+                ?? regular.filter { bundleID.hasPrefix($0.bundleIdentifier! + ".") }
+                    .max { $0.bundleIdentifier!.count < $1.bundleIdentifier!.count }
+                ?? (bundleID.hasPrefix("com.apple.WebKit") ? safari : nil)
+            guard let owner, let ownerID = owner.bundleIdentifier else { continue }
+            processes[ownerID, default: []].append(object)
+            if CoreAudioUtils.isRunningOutput(object) { playing.insert(ownerID) }
+        }
+
+        return regular.map { app in
+            let id = app.bundleIdentifier!
+            return AudioApp(bundleID: id, name: app.localizedName ?? id,
+                            processes: (processes[id] ?? []).sorted(), playing: playing.contains(id))
+        }
+        .sorted { a, b in
+            if a.playing != b.playing { return a.playing }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
     }
 }
 
@@ -252,14 +384,16 @@ private final class Session {
             }
         }
 
-        for i in 0..<frames { mono[i] = (left[i] + right[i]) * 0.5 }
-        mono.withUnsafeBufferPointer { ring.write($0.baseAddress!, count: frames) }
-
-        guard let router else { return }
-        left.withUnsafeBufferPointer { l in
-            right.withUnsafeBufferPointer { r in
-                router.render(left: l.baseAddress!, right: r.baseAddress!, frames: frames, output: outs)
+        // Routing applies the EQ in place first, so the spectrum shows what's actually playing.
+        if let router {
+            left.withUnsafeMutableBufferPointer { l in
+                right.withUnsafeMutableBufferPointer { r in
+                    router.render(left: l.baseAddress!, right: r.baseAddress!, frames: frames, output: outs)
+                }
             }
         }
+
+        for i in 0..<frames { mono[i] = (left[i] + right[i]) * 0.5 }
+        mono.withUnsafeBufferPointer { ring.write($0.baseAddress!, count: frames) }
     }
 }

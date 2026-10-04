@@ -1,14 +1,28 @@
 import SwiftUI
 
+enum Page: String, CaseIterable, Identifiable {
+    case mixer, equalizer
+    var id: String { rawValue }
+    var label: String { self == .mixer ? "Mixer" : "Equalizer" }
+}
+
 struct MainView: View {
     @Environment(DeviceManager.self) private var devices
     @Environment(ProfileStore.self) private var store
     @Environment(AudioEngine.self) private var engine
+    @AppStorage("page") private var page: Page = .mixer
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SpectrumEditorView(feed: engine.feed)
-            OutputShelf()
+        Group {
+            switch page {
+            case .mixer:
+                VStack(alignment: .leading, spacing: 14) {
+                    SpectrumEditorView(feed: engine.feed)
+                    OutputShelf()
+                }
+            case .equalizer:
+                EqualizerView(feed: engine.feed)
+            }
         }
         .padding(16)
         .background(Theme.background)
@@ -19,15 +33,26 @@ struct MainView: View {
         .onChange(of: store.profile) { _, profile in
             engine.update(profile: profile, connected: devices.outputs)
         }
+        .hidingWindowTitle()
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 CaptureStatus()
             }
+            ToolbarItem(placement: .principal) {
+                Picker("Page", selection: $page) {
+                    ForEach(Page.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
             ToolbarItem(placement: .primaryAction) {
-                CaptureModePicker()
+                SourceMenu()
             }
             ToolbarItem(placement: .primaryAction) {
                 RoutingToggle()
+            }
+            ToolbarItem(placement: .primaryAction) {
+                MasterVolumeControl()
             }
             ToolbarItem(placement: .primaryAction) {
                 SettingsLink {
@@ -87,74 +112,15 @@ struct OutputShelf: View {
     }
 }
 
-/// Shows what the spectrum is listening to and whether audio is being routed.
-struct CaptureStatus: View {
-    @Environment(AudioEngine.self) private var engine
-    @Environment(ProfileStore.self) private var store
 
-    private var status: (color: Color, text: String) {
-        let green = Color(hex: 0x1ED760)
-        let outputs = engine.routedOutputs.count
-        let outputsText = "\(outputs) output\(outputs == 1 ? "" : "s")"
-        switch engine.source {
-        case .starting: return (Theme.textTertiary, "Starting…")
-        case .suspended: return (Theme.textTertiary, "Paused for calibration")
-        case .failed(let message): return (Theme.danger, "Audio error: \(message)")
-        case .system, .spotify:
-            let what = engine.source == .spotify ? "Spotify" : "all audio"
-            if engine.routingActive {
-                return outputs == 0
-                    ? (Theme.danger, "Routing \(what) · no outputs on the timeline (silent)")
-                    : (green, "Routing \(what) to \(outputsText)")
-            }
-            if engine.routingEnabled && engine.captureMode == .spotify {
-                return (Theme.accent, "Waiting for Spotify · showing all audio")
-            }
-            return (Theme.accent, "Listening to \(what) · playing normally")
+private extension View {
+    /// The toolbar is full; the window title isn't needed (macOS 15+).
+    @ViewBuilder
+    func hidingWindowTitle() -> some View {
+        if #available(macOS 15.0, *) {
+            toolbar(removing: .title)
+        } else {
+            self
         }
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle().fill(status.color).frame(width: 8, height: 8)
-            Text(status.text)
-                .font(.callout)
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
-        }
-    }
-}
-
-/// Turns routing on/off: on mutes the captured audio's normal output and plays it through the timeline.
-struct RoutingToggle: View {
-    @Environment(AudioEngine.self) private var engine
-
-    var body: some View {
-        @Bindable var engine = engine
-        HStack(spacing: 6) {
-            Text("Route")
-                .font(.callout)
-                .foregroundStyle(Theme.textSecondary)
-            Toggle("Route", isOn: $engine.routingEnabled)
-                .toggleStyle(.switch)
-                .labelsHidden()
-        }
-        .controlSize(.small)
-        .help("On: audio plays through the outputs on the timeline, split by frequency. Off: audio plays normally.")
-    }
-}
-
-/// Chooses whether SoundStage captures and routes everything the Mac plays, or only Spotify.
-struct CaptureModePicker: View {
-    @Environment(AudioEngine.self) private var engine
-
-    var body: some View {
-        @Bindable var engine = engine
-        Picker("Source", selection: $engine.captureMode) {
-            ForEach(AudioEngine.CaptureMode.allCases) { Text($0.label).tag($0) }
-        }
-        .pickerStyle(.segmented)
-        .fixedSize()
-        .help("All audio: everything the Mac plays. Spotify: only Spotify; everything else plays normally.")
     }
 }
