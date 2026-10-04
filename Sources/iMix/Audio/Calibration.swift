@@ -54,7 +54,7 @@ final class CalibrationRun {
         // measured here are the ones the router will actually see.
         let ordered = AggregateDevice.routingOrder(outputUIDs)
         let subDevices = ordered.contains(micUID) ? ordered : ordered + [micUID]
-        let bufferFrames = AggregateDevice.prepareForBluetooth(ordered)
+        let bufferFrames = AggregateDevice.bufferFrames(for: ordered)
         let aggregate = try AggregateDevice(name: "iMix Calibration", subDeviceUIDs: subDevices, tapUUID: nil)
         if let bufferFrames { aggregate.setBufferFrameSize(bufferFrames) }
         self.aggregate = aggregate
@@ -82,7 +82,7 @@ final class CalibrationRun {
 
     /// Runs the measurement. `progress` is called on the main actor with 0...1.
     func perform(progress: @MainActor @escaping (Double) -> Void) async throws -> [CalibrationResult] {
-        try aggregate.start(queue: queue) { [unowned self] _, input, inTime, output, outTime in
+        try aggregate.start(queue: queue, inputBuffers: Set(micLayout.inputBuffers)) { [unowned self] _, input, inTime, output, outTime in
             self.process(input: input, inTime: inTime.pointee, output: output, outTime: outTime.pointee)
         }
         defer { aggregate.stop() }

@@ -79,15 +79,15 @@ final class AudioEngine {
     @ObservationIgnored private var appTimer: Timer?
     @ObservationIgnored private var volumeTimer: Timer?
     @ObservationIgnored private var suspended = false
+    /// Sessions are only built once `start()` has looked up apps and iMix's own process and the UI has
+    /// passed in the profile and connected devices, so launch doesn't build a throwaway session first.
+    @ObservationIgnored private var started = false
+    @ObservationIgnored private var hasDevices = false
     @ObservationIgnored private var defaultOutputUID: String?
 
     func start() {
         guard appTimer == nil else { return }
-        // Leave the user's devices as we found them.
-        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.session = nil
-            SampleRateChanges.restoreAll()
-        }
+        started = true
         refreshApps()
         refreshVolume()
         // Apps start and stop playing at any time; re-check every couple of seconds.
@@ -104,6 +104,7 @@ final class AudioEngine {
     func update(profile: Profile, connected: [OutputDevice]) {
         self.profile = profile
         self.connected = connected
+        hasDevices = true
         reconcile()
     }
 
@@ -130,6 +131,18 @@ final class AudioEngine {
 
     // MARK: Polling
 
+    @ObservationIgnored private var sessionLog: [String] = []
+
+    private func describeChange(from old: Session.Key?, to new: Session.Key) -> String {
+        guard let old else { return "first session" }
+        var parts: [String] = []
+        if old.processes != new.processes { parts.append("processes \(old.processes) -> \(new.processes)") }
+        if old.excluded != new.excluded { parts.append("excluded \(old.excluded) -> \(new.excluded)") }
+        if old.routing != new.routing { parts.append("routing \(old.routing) -> \(new.routing)") }
+        if old.outputs != new.outputs { parts.append("outputs \(old.outputs) -> \(new.outputs)") }
+        return parts.isEmpty ? "same key (restart)" : parts.joined(separator: "; ")
+    }
+
     /// Writes audio-thread health to Application Support/iMix/diagnostics.json and resets the peaks.
     private func writeDiagnostics() {
         guard let session else { return }
@@ -145,6 +158,7 @@ final class AudioEngine {
             "discontinuities": s.discontinuities,
             "outputs": session.key.outputs,
             "routing": session.key.routing,
+            "sessionLog": sessionLog,
         ]
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("iMix/diagnostics.json")
@@ -188,7 +202,7 @@ final class AudioEngine {
     }
 
     private func reconcile() {
-        guard !suspended else { return }
+        guard started, hasDevices, !suspended else { return }
         let selectedProcesses = runningApps
             .filter { selectedApps.contains($0.bundleID) }
             .flatMap(\.processes)
@@ -211,10 +225,13 @@ final class AudioEngine {
             return
         }
 
+        let reason = describeChange(from: session?.key, to: key)
         session = nil
         feed.ring.clear()
         do {
             let newSession = try Session(key: key, ring: feed.ring)
+            sessionLog.append("\(ISO8601DateFormatter().string(from: Date())) \(reason)")
+            if sessionLog.count > 10 { sessionLog.removeFirst() }
             session = newSession
             feed.sampleRate = newSession.sampleRate
             routingActive = routing
@@ -374,13 +391,7 @@ private final class Session {
             }
             subDevices = [uid]
         }
-        let bufferFrames: UInt32?
-        if key.routing {
-            bufferFrames = AggregateDevice.prepareForBluetooth(subDevices)
-        } else {
-            SampleRateChanges.restoreAll()
-            bufferFrames = nil
-        }
+        let bufferFrames = key.routing ? AggregateDevice.bufferFrames(for: subDevices) : nil
         aggregate = try AggregateDevice(name: "iMix", subDeviceUIDs: subDevices, tapUUID: tap.uuid)
         if let bufferFrames { aggregate.setBufferFrameSize(bufferFrames) }
 
@@ -393,7 +404,7 @@ private final class Session {
             router = nil
         }
 
-        try aggregate.start(queue: queue) { [unowned self] _, input, _, output, outTime in
+        try aggregate.start(queue: queue, inputBuffers: Set(aggregate.tapInputBuffers)) { [unowned self] _, input, _, output, outTime in
             let start = mach_absolute_time()
             let frames = self.process(input: input, output: output)
             self.record(start: start, frames: frames, sampleTime: outTime.pointee.mSampleTime)

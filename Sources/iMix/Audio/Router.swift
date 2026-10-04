@@ -9,7 +9,9 @@ struct Biquad {
     enum Kind {
         case lowpass
         case highpass
-        case peaking(gainDB: Double, q: Double)
+        /// Bandwidth in octaves, prewarped so bands near the top of the range don't come out narrower
+        /// than intended (otherwise gaps open between the highest EQ bands).
+        case peaking(gainDB: Double, octaves: Double)
     }
 
     mutating func configure(_ kind: Kind, frequency: Double, sampleRate: Double) {
@@ -30,9 +32,9 @@ struct Biquad {
             b2 = b0
             a1 = -2 * cosw / a0
             a2 = (1 - alpha) / a0
-        case .peaking(let gainDB, let q):
+        case .peaking(let gainDB, let octaves):
             let a = pow(10, gainDB / 40)
-            let alpha = sin(w0) / (2 * q)
+            let alpha = sin(w0) * sinh(log(2) / 2 * octaves * w0 / sin(w0))
             let a0 = 1 + alpha / a
             b0 = (1 + alpha * a) / a0
             b1 = -2 * cosw / a0
@@ -99,7 +101,7 @@ final class GraphicEQ {
                 right[i].reset()
             }
             if gain != gains[i] || !active.contains(i) {
-                let kind = Biquad.Kind.peaking(gainDB: gain, q: EQBands.q)
+                let kind = Biquad.Kind.peaking(gainDB: gain, octaves: EQBands.bandwidth)
                 left[i].configure(kind, frequency: EQBands.centers[i], sampleRate: sampleRate)
                 right[i].configure(kind, frequency: EQBands.centers[i], sampleRate: sampleRate)
             }
@@ -128,7 +130,7 @@ final class GraphicEQ {
         var total = 0.0
         for (i, gain) in gains.enumerated() where abs(gain) >= 0.05 {
             var band = Biquad()
-            band.configure(.peaking(gainDB: gain, q: EQBands.q), frequency: EQBands.centers[i], sampleRate: sampleRate)
+            band.configure(.peaking(gainDB: gain, octaves: EQBands.bandwidth), frequency: EQBands.centers[i], sampleRate: sampleRate)
             total += band.magnitudeDB(at: frequency, sampleRate: sampleRate)
         }
         return total

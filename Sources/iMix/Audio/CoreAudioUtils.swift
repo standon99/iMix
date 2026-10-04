@@ -80,26 +80,6 @@ enum CoreAudioUtils {
         return transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
     }
 
-    static func supportsSampleRate(_ device: AudioDeviceID, _ rate: Double) -> Bool {
-        var addr = address(kAudioDevicePropertyAvailableNominalSampleRates)
-        var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(device, &addr, 0, nil, &size) == noErr, size > 0 else { return false }
-        var ranges = [AudioValueRange](repeating: AudioValueRange(), count: Int(size) / MemoryLayout<AudioValueRange>.size)
-        guard AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &ranges) == noErr else { return false }
-        return ranges.contains { $0.mMinimum <= rate && rate <= $0.mMaximum }
-    }
-
-    /// Sets a device's sample rate and waits briefly for it to take effect.
-    static func setSampleRate(_ device: AudioDeviceID, _ rate: Double) {
-        guard float64(device, kAudioDevicePropertyNominalSampleRate) != rate, supportsSampleRate(device, rate) else { return }
-        var addr = address(kAudioDevicePropertyNominalSampleRate)
-        var value = rate
-        AudioObjectSetPropertyData(device, &addr, 0, nil, UInt32(MemoryLayout<Float64>.size), &value)
-        for _ in 0..<50 where float64(device, kAudioDevicePropertyNominalSampleRate) != rate {
-            usleep(10_000)
-        }
-    }
-
     // MARK: Processes
 
     /// Core Audio process objects whose bundle ID starts with `bundlePrefix` (an app plus its helpers).

@@ -22,22 +22,13 @@ final class AggregateDevice {
 
     private var procID: AudioDeviceIOProcID?
 
-    /// Bluetooth speakers crackle when the aggregate has to resample them from a different rate while
-    /// also chasing their drifting clock. When any Bluetooth output is involved, temporarily move the
-    /// other outputs to its rate (so only small drift corrections remain) and use a larger IO buffer.
-    /// Without Bluetooth, any rates changed earlier are put back.
+    /// Bluetooth speakers crackle if the aggregate has to resample them while also chasing their
+    /// jittery clock, so a Bluetooth output is made the aggregate's clock (see `routingOrder`) and the
+    /// steadier wired outputs take the drift correction instead. That needs no change to anyone's
+    /// device settings. A larger IO buffer gives the correction more slack.
     /// Returns the IO buffer size to use. Shared by routing and calibration so their latencies match.
-    static func prepareForBluetooth(_ uids: [String]) -> UInt32? {
-        let devices = uids.compactMap(CoreAudioUtils.deviceID(forUID:))
-        guard let bluetooth = devices.first(where: CoreAudioUtils.isBluetooth),
-              let rate = CoreAudioUtils.float64(bluetooth, kAudioDevicePropertyNominalSampleRate) else {
-            SampleRateChanges.restoreAll()
-            return nil
-        }
-        for device in devices where !CoreAudioUtils.isBluetooth(device) {
-            SampleRateChanges.set(device, to: rate)
-        }
-        return 1024
+    static func bufferFrames(for uids: [String]) -> UInt32? {
+        uids.compactMap(CoreAudioUtils.deviceID(forUID:)).contains(where: CoreAudioUtils.isBluetooth) ? 1024 : nil
     }
 
     func setBufferFrameSize(_ frames: UInt32) {
@@ -47,14 +38,14 @@ final class AggregateDevice {
     }
 
     /// Sub-device order shared by routing and calibration, so both build the same aggregate:
-    /// wired devices first (the first one is the clock), Bluetooth last, ties by UID.
+    /// Bluetooth first (the first device is the clock), then wired, ties by UID.
     static func routingOrder(_ uids: [String]) -> [String] {
         func isBluetooth(_ uid: String) -> Bool {
             CoreAudioUtils.deviceID(forUID: uid).map(CoreAudioUtils.isBluetooth) ?? false
         }
         return uids.sorted { a, b in
             let ab = isBluetooth(a), bb = isBluetooth(b)
-            return ab != bb ? !ab : a < b
+            return ab != bb ? ab : a < b
         }
     }
 
@@ -110,9 +101,32 @@ final class AggregateDevice {
         }
     }
 
-    func start(queue: DispatchQueue, _ block: @escaping AudioDeviceIOBlock) throws {
+    /// `inputBuffers` are the input buffers the callback actually reads; every other input stream is
+    /// switched off. Otherwise opening an output device that also has a mic (a Bluetooth speaker,
+    /// AirPods) starts its mic and drops it into low-quality call mode.
+    func start(queue: DispatchQueue, inputBuffers: Set<Int>, _ block: @escaping AudioDeviceIOBlock) throws {
         try CoreAudioUtils.check(AudioDeviceCreateIOProcIDWithBlock(&procID, id, queue, block), "Creating IO callback")
+        disableInputStreams(except: inputBuffers)
         try CoreAudioUtils.check(AudioDeviceStart(id, procID), "Starting audio device")
+    }
+
+    private func disableInputStreams(except used: Set<Int>) {
+        guard let procID else { return }
+        var addr = CoreAudioUtils.address(kAudioDevicePropertyIOProcStreamUsage, kAudioObjectPropertyScopeInput)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size) == noErr, size > 0 else { return }
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioHardwareIOProcStreamUsage>.alignment)
+        defer { raw.deallocate() }
+        let usage = raw.assumingMemoryBound(to: AudioHardwareIOProcStreamUsage.self)
+        usage.pointee.mIOProc = unsafeBitCast(procID, to: UnsafeMutableRawPointer.self)
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, raw) == noErr else { return }
+        let count = Int(usage.pointee.mNumberStreams)
+        let flags = raw.advanced(by: MemoryLayout<AudioHardwareIOProcStreamUsage>.offset(of: \.mStreamIsOn)!)
+            .assumingMemoryBound(to: UInt32.self)
+        for stream in 0..<count {
+            flags[stream] = used.contains(stream) ? 1 : 0
+        }
+        AudioObjectSetPropertyData(id, &addr, 0, nil, size, raw)
     }
 
     func stop() {
@@ -153,27 +167,5 @@ final class ProcessTap {
 
     deinit {
         AudioHardwareDestroyProcessTap(id)
-    }
-}
-
-/// Sample rates iMix changed, so they can be put back: the user's devices should be left as they were
-/// once routing stops or the app quits. Main thread only.
-enum SampleRateChanges {
-    /// Device UID → rate before iMix first changed it.
-    private static var originals: [String: Double] = [:]
-
-    static func set(_ device: AudioDeviceID, to rate: Double) {
-        guard let uid = CoreAudioUtils.string(device, kAudioDevicePropertyDeviceUID),
-              let current = CoreAudioUtils.float64(device, kAudioDevicePropertyNominalSampleRate),
-              current != rate else { return }
-        if originals[uid] == nil { originals[uid] = current }
-        CoreAudioUtils.setSampleRate(device, rate)
-    }
-
-    static func restoreAll() {
-        for (uid, rate) in originals {
-            if let device = CoreAudioUtils.deviceID(forUID: uid) { CoreAudioUtils.setSampleRate(device, rate) }
-        }
-        originals = [:]
     }
 }

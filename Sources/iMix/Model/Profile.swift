@@ -83,9 +83,9 @@ enum EQBands {
         "1k", "1.2k", "1.6k", "2k", "2.5k", "3.1k", "4k", "5k", "6.3k", "8k", "10k", "12k", "16k", "20k",
     ]
     static let range: ClosedRange<Double> = -12...12
-    /// Half-octave bandwidth: wider than the 1/3-octave spacing so neighbouring bands blend smoothly.
+    /// Bandwidth in octaves: wider than the 1/3-octave spacing so neighbouring bands blend smoothly.
     /// The overlap is undone by solving for the filter gains (see `GraphicEQ.filterGains`).
-    static let q = 2.87
+    static let bandwidth = 0.5
 
     struct Region {
         let name: String
