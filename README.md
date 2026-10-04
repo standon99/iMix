@@ -1,112 +1,97 @@
 <p align="center">
-  <img src="Resources/Icon/icon-1024.png" width="160" alt="iMix icon">
+  <img src="Resources/Icon/icon-1024.png" width="128" alt="iMix icon">
 </p>
 
 <h1 align="center">iMix</h1>
 
-<p align="center">Split your Mac's audio across several speakers by frequency, like a home-made crossover or surround setup.</p>
+<p align="center"><b>Split your Mac's audio across speakers by frequency.</b><br>
+Turn a Bluetooth speaker into a second subwoofer, add an EQ, and keep everything in sync.</p>
 
----
-
-iMix captures what your Mac is playing (everything, or just the apps you pick), mutes it at the source, and plays it back through any combination of speakers. Each speaker gets only the frequencies you assign it, with its own channel, volume and delay. A typical use is pairing a Bluetooth speaker as a second subwoofer alongside wired desk speakers.
+<p align="center">
+  <img src="docs/mixer.png" width="820" alt="iMix mixer: live spectrum above a frequency timeline of speakers">
+</p>
 
 ## Features
 
-- **Frequency timeline (Mixer).** A live spectrum with a timeline underneath. Drag a speaker onto the timeline, then drag the clip's edges to choose its frequency range. Clips stack in rows, and frequencies nothing covers are shaded red.
-- **Per-speaker controls.** Each speaker gets L / R / L+R, volume and mute, which apply to all of its clips.
-- **31-band equalizer.** Third-octave faders (±12 dB) grouped into sub-bass, bass, low mids, mids, upper mids, presence and brilliance, with presets. The response curve passes exactly through every fader, and boosts get automatic headroom so they don't clip.
-- **Source picker.** Route all system audio, or tick specific running apps (Spotify, Safari, Chrome…) and leave everything else alone.
-- **Master volume.** Follows the Mac's volume keys and scales every output together.
-- **Calibration.** Plays a sweep through each speaker, listens with the mic and measures latency. Every output is then delayed to line up with the slowest one, usually the Bluetooth speaker.
+- **Frequency timeline.** Drag a speaker onto the timeline, then drag its edges to choose which frequencies it plays. Gaps show up red.
+- **Any mix of speakers.** Wired, built-in, HDMI and Bluetooth together, each with its own L / R / L+R, volume and mute.
+- **31-band equalizer.** Grouped into sub-bass, bass, mids, presence and more, with presets and automatic clipping protection.
+- **Auto-sync.** Calibration measures each speaker's delay with your mic and lines them all up.
+- **Your choice of source.** Route all system audio, or only the apps you pick.
+- **Volume keys.** The Mac's volume keys control every speaker at once.
 
-## Requirements
+<p align="center">
+  <img src="docs/equalizer.png" width="820" alt="iMix equalizer with 31 faders grouped into frequency regions">
+</p>
 
-- macOS 14.2 or later (process taps)
-- Xcode (or its command-line tools) to build
+## Install
 
-## Build & run
-
-```sh
-./scripts/run.sh            # optimized build, wrapped in build/iMix.app, then launched
-./scripts/run.sh debug      # unoptimized build (too slow for real use with the EQ on)
-NO_LAUNCH=1 ./scripts/run.sh
-```
-
-The script builds with SwiftPM, wraps the binary in an ad-hoc-signed `.app` (macOS only grants audio-capture and microphone permission to app bundles) and opens it. On first launch, allow **system audio recording**. Calibration will also ask for the **microphone**.
-
-To install a stable copy in `/Applications` (recommended if you turn on **Open iMix at login**, since `build/iMix.app` is recreated on every build):
+Requires **macOS 14.2+** and **Xcode** (or its command-line tools).
 
 ```sh
-./scripts/install.sh
+git clone <this repo> && cd iMix
+./scripts/install.sh      # builds and copies iMix.app to /Applications
 ```
 
-To open the code in Xcode, open `Package.swift`.
+On first launch, allow **system audio recording**. Calibration also asks for the **microphone**.
 
-## Using it
+## Quick start
 
-1. **Pick a source** in the toolbar: *All audio*, or tick the apps you want.
-2. **Mixer:** drag speakers from the bottom row onto the timeline and set each clip's range. For example:
-   - Bluetooth speaker as a sub: **20 Hz – ~100 Hz**, L+R
-   - Desk speakers + wired sub: **20 Hz – 20 kHz** (the wired sub's own crossover still works)
-3. **Turn on Route.** The captured audio is muted at its source and played through your clips. Turn it off and everything plays normally again. If iMix quits or crashes, the audio comes back by itself.
-4. **Calibrate** (Settings → Calibrate): sit where you listen, keep the room quiet, then Start → **Apply**. Recalibrate whenever you add or remove a Bluetooth speaker.
-5. **Equalizer:** switch to the Equalizer page. It applies while Route is on.
-6. **Settings → General:** turn on *Open iMix at login* to have it start with your Mac.
+1. **Mixer:** drag speakers from the bottom row onto the timeline and set each one's range. For example, Bluetooth speaker **20–100 Hz**, desk speakers **20 Hz–20 kHz**.
+2. **Route** (toolbar): turn it on. Audio is now split across your speakers. Turn it off to go back to normal.
+3. **Settings → Calibrate:** sit where you listen, press Start, then **Apply**.
+4. **Equalizer** (toolbar): shape the sound. It applies while Route is on.
+5. **Settings → General:** optionally open iMix at login.
 
-### Good to know
-
-- With a Bluetooth speaker routed, **everything is delayed by roughly 0.4 s** so the speakers stay in sync. That's fine for music, but video will be out of lip-sync. For video, remove the Bluetooth clip or use Route only for your music app.
-- The volume keys only work when the Mac's sound output is a real device. Multi-Output Devices have no volume control. iMix doesn't need a Multi-Output or Aggregate device; it creates its own private one.
-
-## How it works
-
-```
-App(s) / system ──► Core Audio process tap (muted while routing)
-                         │
-                         ▼
-          Private aggregate device: tap + every routed output
-          (wired output is the clock, drift compensation on the rest)
-                         │  one IO callback
-                         ▼
-          31-band graphic EQ ──► per output:
-                                   Σ clips (LR4 high-pass + LR4 low-pass)
-                                   → L / R / L+R → gain → calibration delay
-```
-
-- **Clips** are Linkwitz-Riley 4th-order band-passes. Where two speakers' clips meet, the crossover sums flat when they're aligned in time.
-- **Calibration** builds the same aggregate the router uses, plus the mic, then plays a 150 Hz–12 kHz log sweep five times per speaker. It records on the same sample timeline and finds the direct sound by FFT cross-correlation (first strong peak, sub-sample interpolation). The raw latencies include buffering macOS adds when Bluetooth and wired devices share an aggregate. Only the differences matter, and that's what's applied as delay.
-- **The EQ** solves for its 31 filter gains from an interaction matrix, so overlapping bands don't overshoot the faders.
-- **All-audio capture** excludes iMix's own process so its output is never captured again (no feedback).
+**Good to know**
+- With a Bluetooth speaker in the mix, everything is delayed by about **0.4 s** to stay in sync. That's fine for music, but video will be out of lip-sync.
+- iMix doesn't need a Multi-Output Device; it builds its own. Set your Mac's sound output to a real device so the volume keys work.
+- If iMix quits or crashes, audio goes straight back to normal.
 
 ## Troubleshooting
 
-| Symptom | Likely cause / fix |
+| Problem | Try |
 |---|---|
-| Crackling on the Bluetooth speaker | Check `~/Library/Application Support/iMix/diagnostics.json`. `discontinuities` > 0 or a high `maxLoadPercent` means the audio callback is struggling (make sure you're on the release build). If both are clean, try the speaker directly from macOS Sound settings; if it crackles there too, it's the Bluetooth link. |
-| Speakers sound out of step | Recalibrate and click Apply. Latencies change when you add or remove a Bluetooth speaker or change sample rate. |
-| Calibration says "Not heard" | The speaker's volume is too low or it's off, or the wrong mic is selected (pick the Mac's built-in mic). |
-| Silence with Route on | Nothing is on the timeline, or every clip's speaker is muted / at 0%. The status at top left says which. |
-| Permission prompts after every rebuild | Ad-hoc signing changes each build; click Allow. |
+| Speakers out of step | Recalibrate whenever you add or remove a Bluetooth speaker. |
+| Crackling | Check `~/Library/Application Support/iMix/diagnostics.json`: `discontinuities` should stay at 0. If it does, test the speaker without iMix; it may be the Bluetooth link. |
+| Silence with Route on | Nothing is on the timeline, or the speakers are muted. The status at top left explains which. |
+| Calibration "Not heard" | Turn that speaker up and pick the Mac's built-in mic. |
 
-## Project layout
+<details>
+<summary><b>How it works</b></summary>
 
 ```
-Sources/iMix/
-  App/      IMixApp (entry point), LegacyMigration (carries settings over from earlier names)
-  Audio/    AudioEngine (taps, sessions, master volume, app discovery), Router (EQ, clip filters,
-            per-device rendering), AggregateDevice + ProcessTap, Calibration, SpectrumFeed (FFT),
-            DeviceManager, CoreAudioUtils
-  Model/    Profile (clips, devices, EQ), ProfileStore (edits + persistence)
-  UI/       MainView, Toolbar, SpectrumEditorView + SpectrumCanvas (mixer), EqualizerView,
-            DeviceSticker, SettingsView (calibration), GeneralSettingsView (login item, About), Theme
-Resources/  Info.plist, Icon/ (icon-1024.png, AppIcon.icns)
-scripts/    run.sh (build + bundle + launch), install.sh (copy to /Applications),
-            make_icon.sh + make_icon.swift (icon)
+apps / system ─► Core Audio process tap (muted while routing)
+                     │
+                     ▼
+     private aggregate device: tap + every routed speaker
+     (Bluetooth is the clock; wired speakers get drift correction)
+                     │  one IO callback
+                     ▼
+     31-band EQ ─► per speaker: Σ clips (Linkwitz-Riley band-passes)
+                                → L / R / L+R → gain → sync delay
 ```
 
-Settings and calibration are saved to `~/Library/Application Support/iMix/profile.json`.
+- **Clips** are 4th-order Linkwitz-Riley band-passes, so neighbouring speakers cross over cleanly.
+- **Calibration** plays log sweeps through the same aggregate the router uses, records the mic on the same clock, and finds each arrival by FFT cross-correlation. Only the differences between speakers are applied as delay.
+- **The EQ** solves for its filter gains so the curve passes exactly through each fader.
+- iMix leaves your devices alone: no sample-rate changes, and it never opens a speaker's mic (which would force Bluetooth into call quality). All-audio capture excludes iMix itself, so there's no feedback.
+</details>
 
-### Developer notes
+<details>
+<summary><b>Development</b></summary>
 
-- `open build/iMix.app --args --calibrate-to /tmp/cal.json [--outputs uid1,uid2]` runs a headless calibration and writes the results as JSON.
-- `./scripts/make_icon.sh` re-renders the icon and rebuilds `AppIcon.icns`.
+```sh
+./scripts/run.sh          # build release, bundle into build/iMix.app, launch
+./scripts/run.sh debug    # unoptimized (too slow for real use)
+./scripts/make_icon.sh    # re-render the app icon
+```
+
+Open `Package.swift` in Xcode to edit. Sources live in `Sources/iMix/` (`Audio/` engine, router, calibration; `UI/` SwiftUI views; `Model/` saved profile). Settings are stored in `~/Library/Application Support/iMix/profile.json`.
+
+`open build/iMix.app --args --calibrate-to /tmp/cal.json` runs a calibration without the UI and writes the results as JSON.
+</details>
+
+---
+
+<p align="center"><sub>Designed by Siddhant Tandon, 2026</sub></p>
