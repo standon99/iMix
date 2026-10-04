@@ -125,7 +125,31 @@ final class AudioEngine {
 
     // MARK: Polling
 
+    /// Writes audio-thread health to Application Support/SoundStage/diagnostics.json and resets the peaks.
+    private func writeDiagnostics() {
+        guard let session else { return }
+        let s = session.stats
+        session.stats.maxLoad = 0
+        let info: [String: Any] = [
+            "time": ISO8601DateFormatter().string(from: Date()),
+            "sampleRate": session.sampleRate,
+            "framesPerCallback": s.framesPerCallback,
+            "callbacks": s.callbacks,
+            "maxLoadPercent": (s.maxLoad * 1000).rounded() / 10,
+            "heavyCallbacks": s.heavyCallbacks,
+            "discontinuities": s.discontinuities,
+            "outputs": session.key.outputs,
+            "routing": session.key.routing,
+        ]
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("SoundStage/diagnostics.json")
+        if let data = try? JSONSerialization.data(withJSONObject: info, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: url)
+        }
+    }
+
     private func refreshApps() {
+        writeDiagnostics()
         let apps = AppDiscovery.runningApps()
         if apps != runningApps { runningApps = apps }
 
@@ -307,6 +331,20 @@ private final class Session {
 
     let key: Key
     let router: Router?
+
+    /// Audio-thread health, read (racily, it's only diagnostics) by the engine.
+    struct Stats {
+        var callbacks = 0
+        var framesPerCallback = 0
+        /// Worst processing time as a fraction of the buffer's duration, since the last reset.
+        var maxLoad = 0.0
+        /// Callbacks that used more than 70% of their time.
+        var heavyCallbacks = 0
+        /// Times the output timeline jumped, i.e. the device skipped or repeated audio.
+        var discontinuities = 0
+    }
+    var stats = Stats()
+    private var expectedSampleTime: Double?
     var sampleRate: Double { aggregate.sampleRate }
 
     private let tap: ProcessTap
@@ -331,7 +369,9 @@ private final class Session {
             }
             subDevices = [uid]
         }
+        let bufferFrames = key.routing ? AggregateDevice.prepareForBluetooth(subDevices) : nil
         aggregate = try AggregateDevice(name: "SoundStage", subDeviceUIDs: subDevices, tapUUID: tap.uuid)
+        if let bufferFrames { aggregate.setBufferFrameSize(bufferFrames) }
 
         if key.routing {
             let programs = aggregate.subs
@@ -342,8 +382,10 @@ private final class Session {
             router = nil
         }
 
-        try aggregate.start(queue: queue) { [unowned self] _, input, _, output, _ in
-            self.process(input: input, output: output)
+        try aggregate.start(queue: queue) { [unowned self] _, input, _, output, outTime in
+            let start = mach_absolute_time()
+            let frames = self.process(input: input, output: output)
+            self.record(start: start, frames: frames, sampleTime: outTime.pointee.mSampleTime)
         }
     }
 
@@ -351,7 +393,27 @@ private final class Session {
         aggregate.stop()
     }
 
-    private func process(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>) {
+    private static let ticksPerSecond: Double = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return 1e9 * Double(info.denom) / Double(info.numer)
+    }()
+
+    private func record(start: UInt64, frames: Int, sampleTime: Double) {
+        guard frames > 0 else { return }
+        let seconds = Double(mach_absolute_time() - start) / Self.ticksPerSecond
+        let load = seconds / (Double(frames) / aggregate.sampleRate)
+        stats.callbacks += 1
+        stats.framesPerCallback = frames
+        stats.maxLoad = max(stats.maxLoad, load)
+        if load > 0.7 { stats.heavyCallbacks += 1 }
+        if let expected = expectedSampleTime, abs(sampleTime - expected) > 1 { stats.discontinuities += 1 }
+        expectedSampleTime = sampleTime + Double(frames)
+    }
+
+    /// Returns the number of frames processed.
+    @discardableResult
+    private func process(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>) -> Int {
         let ins = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let outs = UnsafeMutableAudioBufferListPointer(output)
         for buffer in outs {
@@ -360,7 +422,7 @@ private final class Session {
 
         let tapBuffers = aggregate.tapInputBuffers
         guard !tapBuffers.isEmpty, tapBuffers.upperBound <= ins.count,
-              let firstData = ins[tapBuffers.lowerBound].mData else { return }
+              let firstData = ins[tapBuffers.lowerBound].mData else { return 0 }
         let first = ins[tapBuffers.lowerBound]
         let channels = max(Int(first.mNumberChannels), 1)
         let frames = min(Int(first.mDataByteSize) / (MemoryLayout<Float>.size * channels), left.count)
@@ -395,5 +457,6 @@ private final class Session {
 
         for i in 0..<frames { mono[i] = (left[i] + right[i]) * 0.5 }
         mono.withUnsafeBufferPointer { ring.write($0.baseAddress!, count: frames) }
+        return frames
     }
 }

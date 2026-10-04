@@ -22,13 +22,31 @@ final class AggregateDevice {
 
     private var procID: AudioDeviceIOProcID?
 
+    /// Bluetooth speakers crackle when the aggregate has to resample them from a different rate while
+    /// also chasing their drifting clock. When one is involved, move the wired outputs to its rate (so
+    /// only small drift corrections remain) and use a larger IO buffer for more slack.
+    /// Returns the IO buffer size to use. Shared by routing and calibration so their latencies match.
+    static func prepareForBluetooth(_ uids: [String]) -> UInt32? {
+        let devices = uids.compactMap(CoreAudioUtils.deviceID(forUID:))
+        guard let bluetooth = devices.first(where: CoreAudioUtils.isBluetooth),
+              let rate = CoreAudioUtils.float64(bluetooth, kAudioDevicePropertyNominalSampleRate) else { return nil }
+        for device in devices where !CoreAudioUtils.isBluetooth(device) {
+            CoreAudioUtils.setSampleRate(device, rate)
+        }
+        return 1024
+    }
+
+    func setBufferFrameSize(_ frames: UInt32) {
+        var addr = CoreAudioUtils.address(kAudioDevicePropertyBufferFrameSize)
+        var value = frames
+        AudioObjectSetPropertyData(id, &addr, 0, nil, UInt32(MemoryLayout<UInt32>.size), &value)
+    }
+
     /// Sub-device order shared by routing and calibration, so both build the same aggregate:
     /// wired devices first (the first one is the clock), Bluetooth last, ties by UID.
     static func routingOrder(_ uids: [String]) -> [String] {
         func isBluetooth(_ uid: String) -> Bool {
-            guard let device = CoreAudioUtils.deviceID(forUID: uid) else { return false }
-            let transport = CoreAudioUtils.uint32(device, kAudioDevicePropertyTransportType)
-            return transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
+            CoreAudioUtils.deviceID(forUID: uid).map(CoreAudioUtils.isBluetooth) ?? false
         }
         return uids.sorted { a, b in
             let ab = isBluetooth(a), bb = isBluetooth(b)

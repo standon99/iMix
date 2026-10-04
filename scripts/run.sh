@@ -3,7 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CONFIG="${1:-debug}"
+# Release by default: the audio callback is several times too slow unoptimized.
+CONFIG="${1:-release}"
 swift build -c "$CONFIG"
 
 APP="build/SoundStage.app"

@@ -54,7 +54,9 @@ final class CalibrationRun {
         // measured here are the ones the router will actually see.
         let ordered = AggregateDevice.routingOrder(outputUIDs)
         let subDevices = ordered.contains(micUID) ? ordered : ordered + [micUID]
+        let bufferFrames = AggregateDevice.prepareForBluetooth(ordered)
         let aggregate = try AggregateDevice(name: "SoundStage Calibration", subDeviceUIDs: subDevices, tapUUID: nil)
+        if let bufferFrames { aggregate.setBufferFrameSize(bufferFrames) }
         self.aggregate = aggregate
         let sr = aggregate.sampleRate
 
