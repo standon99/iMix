@@ -125,7 +125,7 @@ final class AudioEngine {
 
     // MARK: Polling
 
-    /// Writes audio-thread health to Application Support/iSound/diagnostics.json and resets the peaks.
+    /// Writes audio-thread health to Application Support/iMix/diagnostics.json and resets the peaks.
     private func writeDiagnostics() {
         guard let session else { return }
         let s = session.stats
@@ -142,7 +142,7 @@ final class AudioEngine {
             "routing": session.key.routing,
         ]
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("iSound/diagnostics.json")
+            .appendingPathComponent("iMix/diagnostics.json")
         if let data = try? JSONSerialization.data(withJSONObject: info, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: url)
         }
@@ -153,7 +153,7 @@ final class AudioEngine {
         let apps = AppDiscovery.runningApps()
         if apps != runningApps { runningApps = apps }
 
-        // iSound's own process object can appear only after it first touches audio.
+        // iMix's own process object can appear only after it first touches audio.
         let own = CoreAudioUtils.ownProcessObject()
         if own != ownProcess { ownProcess = own }
         reconcile()
@@ -190,7 +190,7 @@ final class AudioEngine {
             .sorted()
         let wantsApps = !selectedApps.isEmpty
         let tapApps = wantsApps && !selectedProcesses.isEmpty
-        // A whole-system tap must leave iSound out, or routing would re-capture its own output.
+        // A whole-system tap must leave iMix out, or routing would re-capture its own output.
         let canRoute = wantsApps ? tapApps : ownProcess != nil
         let routing = routingEnabled && canRoute
         let key = Session.Key(
@@ -350,7 +350,7 @@ private final class Session {
     private let tap: ProcessTap
     private let aggregate: AggregateDevice
     private let ring: SampleRing
-    private let queue = DispatchQueue(label: "iSound.audio", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "iMix.audio", qos: .userInteractive)
     private var left = [Float](repeating: 0, count: 8192)
     private var right = [Float](repeating: 0, count: 8192)
     private var mono = [Float](repeating: 0, count: 8192)
@@ -370,7 +370,7 @@ private final class Session {
             subDevices = [uid]
         }
         let bufferFrames = key.routing ? AggregateDevice.prepareForBluetooth(subDevices) : nil
-        aggregate = try AggregateDevice(name: "iSound", subDeviceUIDs: subDevices, tapUUID: tap.uuid)
+        aggregate = try AggregateDevice(name: "iMix", subDeviceUIDs: subDevices, tapUUID: tap.uuid)
         if let bufferFrames { aggregate.setBufferFrameSize(bufferFrames) }
 
         if key.routing {

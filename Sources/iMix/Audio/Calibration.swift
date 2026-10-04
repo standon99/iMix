@@ -36,7 +36,7 @@ final class CalibrationRun {
     private let totalFrames: Int
     private let micLayout: AggregateDevice.SubLayout
     private let outputLayouts: [AggregateDevice.SubLayout]
-    private let queue = DispatchQueue(label: "iSound.calibration", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "iMix.calibration", qos: .userInteractive)
 
     // Written on the audio thread.
     private var recording: [Float]
@@ -55,7 +55,7 @@ final class CalibrationRun {
         let ordered = AggregateDevice.routingOrder(outputUIDs)
         let subDevices = ordered.contains(micUID) ? ordered : ordered + [micUID]
         let bufferFrames = AggregateDevice.prepareForBluetooth(ordered)
-        let aggregate = try AggregateDevice(name: "iSound Calibration", subDeviceUIDs: subDevices, tapUUID: nil)
+        let aggregate = try AggregateDevice(name: "iMix Calibration", subDeviceUIDs: subDevices, tapUUID: nil)
         if let bufferFrames { aggregate.setBufferFrameSize(bufferFrames) }
         self.aggregate = aggregate
         let sr = aggregate.sampleRate
@@ -352,7 +352,7 @@ enum MicrophoneAccess {
     }
 }
 
-/// `open iSound.app --args --calibrate-to <file.json>` runs a calibration on every connected output
+/// `open iMix.app --args --calibrate-to <file.json>` runs a calibration on every connected output
 /// at launch and writes the results, for testing without clicking through Settings.
 enum CalibrationCommandLine {
     @MainActor

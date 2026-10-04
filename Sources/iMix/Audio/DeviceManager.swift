@@ -78,7 +78,7 @@ final class DeviceManager {
         case kAudioDeviceTransportTypeHDMI, kAudioDeviceTransportTypeDisplayPort: transport = .hdmi
         case kAudioDeviceTransportTypeVirtual: transport = .virtual
         case kAudioDeviceTransportTypeAggregate, kAudioDeviceTransportTypeAutoAggregate:
-            return nil // Multi-Output / Aggregate devices are combinations of real ones; iSound routes to the real ones.
+            return nil // Multi-Output / Aggregate devices are combinations of real ones; iMix routes to the real ones.
         default: transport = .other
         }
         guard transport != .virtual else { return nil }

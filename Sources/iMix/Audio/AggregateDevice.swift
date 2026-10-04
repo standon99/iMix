@@ -59,7 +59,7 @@ final class AggregateDevice {
         precondition(!subDeviceUIDs.isEmpty)
         var description: [String: Any] = [
             kAudioAggregateDeviceNameKey: name,
-            kAudioAggregateDeviceUIDKey: "iSound-" + UUID().uuidString,
+            kAudioAggregateDeviceUIDKey: "iMix-" + UUID().uuidString,
             kAudioAggregateDeviceMainSubDeviceKey: subDeviceUIDs[0],
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
@@ -136,9 +136,9 @@ final class ProcessTap {
             ? CATapDescription(stereoGlobalTapButExcludeProcesses: excluding)
             : CATapDescription(stereoMixdownOfProcesses: processes)
         description.uuid = UUID()
-        description.name = "iSound"
+        description.name = "iMix"
         description.isPrivate = true
-        // Muted only while iSound is reading it, so audio comes back if the app quits or crashes.
+        // Muted only while iMix is reading it, so audio comes back if the app quits or crashes.
         description.muteBehavior = muted ? .mutedWhenTapped : .unmuted
 
         var tapID = AudioObjectID(kAudioObjectUnknown)

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @main
-struct ISoundApp: App {
+struct IMixApp: App {
     // Declared first so it runs before the stores below read their saved state.
     private let migrated: Void = LegacyMigration.run()
     @State private var devices = DeviceManager()
@@ -14,7 +14,7 @@ struct ISoundApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("iSound") {
+        WindowGroup("iMix") {
             MainView()
                 .environment(devices)
                 .environment(store)

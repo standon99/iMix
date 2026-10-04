@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="Resources/Icon/icon-1024.png" width="160" alt="iSound icon">
+  <img src="Resources/Icon/icon-1024.png" width="160" alt="iMix icon">
 </p>
 
-<h1 align="center">iSound</h1>
+<h1 align="center">iMix</h1>
 
 <p align="center">Split your Mac's audio across several speakers by frequency, like a home-made crossover or surround setup.</p>
 
 ---
 
-iSound captures what your Mac is playing (everything, or just the apps you pick), mutes it at the source, and plays it back through any combination of speakers. Each speaker gets only the frequencies you assign it, with its own channel, volume and delay. A typical use is pairing a Bluetooth speaker as a second subwoofer alongside wired desk speakers.
+iMix captures what your Mac is playing (everything, or just the apps you pick), mutes it at the source, and plays it back through any combination of speakers. Each speaker gets only the frequencies you assign it, with its own channel, volume and delay. A typical use is pairing a Bluetooth speaker as a second subwoofer alongside wired desk speakers.
 
 ## Features
 
@@ -27,7 +27,7 @@ iSound captures what your Mac is playing (everything, or just the apps you pick)
 ## Build & run
 
 ```sh
-./scripts/run.sh            # optimized build, wrapped in build/iSound.app, then launched
+./scripts/run.sh            # optimized build, wrapped in build/iMix.app, then launched
 ./scripts/run.sh debug      # unoptimized build (too slow for real use with the EQ on)
 NO_LAUNCH=1 ./scripts/run.sh
 ```
@@ -42,15 +42,15 @@ To open the code in Xcode, open `Package.swift`.
 2. **Mixer:** drag speakers from the bottom row onto the timeline and set each clip's range. For example:
    - Bluetooth speaker as a sub: **20 Hz – ~100 Hz**, L+R
    - Desk speakers + wired sub: **20 Hz – 20 kHz** (the wired sub's own crossover still works)
-3. **Turn on Route.** The captured audio is muted at its source and played through your clips. Turn it off and everything plays normally again. If iSound quits or crashes, the audio comes back by itself.
+3. **Turn on Route.** The captured audio is muted at its source and played through your clips. Turn it off and everything plays normally again. If iMix quits or crashes, the audio comes back by itself.
 4. **Calibrate** (Settings → Calibrate): sit where you listen, keep the room quiet, then Start → **Apply**. Recalibrate whenever you add or remove a Bluetooth speaker.
 5. **Equalizer:** switch to the Equalizer page. It applies while Route is on.
 
 ### Good to know
 
 - With a Bluetooth speaker routed, **everything is delayed by roughly 0.4 s** so the speakers stay in sync. That's fine for music, but video will be out of lip-sync. For video, remove the Bluetooth clip or use Route only for your music app.
-- When a Bluetooth speaker is routed, iSound sets your wired outputs to the Bluetooth speaker's sample rate (usually 44.1 kHz) to avoid crackling. This changes those devices' setting in macOS, and it stays changed after iSound quits.
-- The volume keys only work when the Mac's sound output is a real device. Multi-Output Devices have no volume control. iSound doesn't need a Multi-Output or Aggregate device; it creates its own private one.
+- When a Bluetooth speaker is routed, iMix sets your wired outputs to the Bluetooth speaker's sample rate (usually 44.1 kHz) to avoid crackling. This changes those devices' setting in macOS, and it stays changed after iMix quits.
+- The volume keys only work when the Mac's sound output is a real device. Multi-Output Devices have no volume control. iMix doesn't need a Multi-Output or Aggregate device; it creates its own private one.
 
 ## How it works
 
@@ -70,13 +70,13 @@ App(s) / system ──► Core Audio process tap (muted while routing)
 - **Clips** are Linkwitz-Riley 4th-order band-passes. Where two speakers' clips meet, the crossover sums flat when they're aligned in time.
 - **Calibration** builds the same aggregate the router uses, plus the mic, then plays a 150 Hz–12 kHz log sweep five times per speaker. It records on the same sample timeline and finds the direct sound by FFT cross-correlation (first strong peak, sub-sample interpolation). The raw latencies include buffering macOS adds when Bluetooth and wired devices share an aggregate. Only the differences matter, and that's what's applied as delay.
 - **The EQ** solves for its 31 filter gains from an interaction matrix, so overlapping bands don't overshoot the faders.
-- **All-audio capture** excludes iSound's own process so its output is never captured again (no feedback).
+- **All-audio capture** excludes iMix's own process so its output is never captured again (no feedback).
 
 ## Troubleshooting
 
 | Symptom | Likely cause / fix |
 |---|---|
-| Crackling on the Bluetooth speaker | Check `~/Library/Application Support/iSound/diagnostics.json`. `discontinuities` > 0 or a high `maxLoadPercent` means the audio callback is struggling (make sure you're on the release build). If both are clean, try the speaker directly from macOS Sound settings; if it crackles there too, it's the Bluetooth link. |
+| Crackling on the Bluetooth speaker | Check `~/Library/Application Support/iMix/diagnostics.json`. `discontinuities` > 0 or a high `maxLoadPercent` means the audio callback is struggling (make sure you're on the release build). If both are clean, try the speaker directly from macOS Sound settings; if it crackles there too, it's the Bluetooth link. |
 | Speakers sound out of step | Recalibrate and click Apply. Latencies change when you add or remove a Bluetooth speaker or change sample rate. |
 | Calibration says "Not heard" | The speaker's volume is too low or it's off, or the wrong mic is selected (pick the Mac's built-in mic). |
 | Silence with Route on | Nothing is on the timeline, or every clip's speaker is muted / at 0%. The status at top left says which. |
@@ -85,8 +85,8 @@ App(s) / system ──► Core Audio process tap (muted while routing)
 ## Project layout
 
 ```
-Sources/iSound/
-  App/      ISoundApp (entry point), LegacyMigration (SoundStage → iSound settings)
+Sources/iMix/
+  App/      IMixApp (entry point), LegacyMigration (carries settings over from earlier names)
   Audio/    AudioEngine (taps, sessions, master volume, app discovery), Router (EQ, clip filters,
             per-device rendering), AggregateDevice + ProcessTap, Calibration, SpectrumFeed (FFT),
             DeviceManager, CoreAudioUtils
@@ -97,9 +97,9 @@ Resources/  Info.plist, Icon/ (icon-1024.png, AppIcon.icns)
 scripts/    run.sh (build + bundle + launch), make_icon.sh + make_icon.swift (icon)
 ```
 
-Settings and calibration are saved to `~/Library/Application Support/iSound/profile.json`.
+Settings and calibration are saved to `~/Library/Application Support/iMix/profile.json`.
 
 ### Developer notes
 
-- `open build/iSound.app --args --calibrate-to /tmp/cal.json [--outputs uid1,uid2]` runs a headless calibration and writes the results as JSON.
+- `open build/iMix.app --args --calibrate-to /tmp/cal.json [--outputs uid1,uid2]` runs a headless calibration and writes the results as JSON.
 - `./scripts/make_icon.sh` re-renders the icon and rebuilds `AppIcon.icns`.

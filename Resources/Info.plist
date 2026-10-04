@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>iSound</string>
-    <key>CFBundleDisplayName</key><string>iSound</string>
-    <key>CFBundleIdentifier</key><string>local.isound.app</string>
-    <key>CFBundleExecutable</key><string>iSound</string>
+    <key>CFBundleName</key><string>iMix</string>
+    <key>CFBundleDisplayName</key><string>iMix</string>
+    <key>CFBundleIdentifier</key><string>local.imix.app</string>
+    <key>CFBundleExecutable</key><string>iMix</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
@@ -13,8 +13,8 @@
     <key>LSMinimumSystemVersion</key><string>14.2</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>iSound listens to test sweeps through the microphone to measure each speaker's latency during calibration.</string>
+    <string>iMix listens to test sweeps through the microphone to measure each speaker's latency during calibration.</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>iSound captures the audio your Mac plays so it can split it across your speakers and equalize it.</string>
+    <string>iMix captures the audio your Mac plays so it can split it across your speakers and equalize it.</string>
 </dict>
 </plist>

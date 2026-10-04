@@ -1,4 +1,4 @@
-// Renders the iSound app icon: a shaded waveform on a dark grey squircle.
+// Renders the iMix app icon: a shaded waveform on a dark grey squircle.
 // Usage: swift scripts/make_icon.swift <output.png>
 import AppKit
 import CoreGraphics

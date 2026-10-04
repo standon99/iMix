@@ -1,7 +1,7 @@
 import CoreAudio
 import Foundation
 
-/// Thin wrappers over AudioObjectGetPropertyData for the handful of properties iSound reads.
+/// Thin wrappers over AudioObjectGetPropertyData for the handful of properties iMix reads.
 enum CoreAudioUtils {
     struct Failure: LocalizedError {
         let step: String
@@ -109,7 +109,7 @@ enum CoreAudioUtils {
             .sorted()
     }
 
-    /// iSound's own process object, so a whole-system tap can leave out what iSound itself plays
+    /// iMix's own process object, so a whole-system tap can leave out what iMix itself plays
     /// (otherwise routing would capture its own output and feed back).
     static func ownProcessObject() -> AudioObjectID? {
         var addr = address(kAudioHardwarePropertyTranslatePIDToProcessObject)
