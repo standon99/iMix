@@ -50,10 +50,10 @@ final class AudioEngine {
     }
 
     // MARK: Volume
-    // Each routed speaker's sticker sets that speaker's own volume (the same one Control Center
-    // changes), so 100% means the speaker's full volume. The master is iMix's own and scales every
-    // speaker; it's never tied to the Mac's output device. While routing, iMix catches the keyboard
-    // volume keys (with Accessibility access) and uses them for the master instead.
+    // Each routed speaker's sticker *is* that speaker's own volume slider (the one Control Center
+    // shows), one to one. The master is iMix's own: it turns the signal down in software, so it never
+    // limits how far a speaker's own volume can go. While routing, iMix catches the keyboard volume
+    // keys (with Accessibility access) and uses them for the master.
 
     private(set) var masterVolume: Double = UserDefaults.standard.object(forKey: "masterVolume") as? Double ?? 1
     private(set) var masterMuted = false
@@ -114,10 +114,9 @@ final class AudioEngine {
         for (uid, device) in hardwareVolumeOutputs {
             guard let hw = MasterVolume.get(on: device).map(Double.init) else { continue }
             lastSetVolume[uid] = hw
-            let sticker = masterVolume > 0.05 ? min(hw / masterVolume, 1) : 1
-            if abs(sticker - (profile.devices[uid]?.masterVolume ?? 1)) > 0.01 {
-                profile.devices[uid]?.masterVolume = sticker
-                onDeviceVolumeChanged?(uid, sticker)
+            if abs(hw - (profile.devices[uid]?.masterVolume ?? 1)) > 0.01 {
+                profile.devices[uid]?.masterVolume = hw
+                onDeviceVolumeChanged?(uid, hw)
             }
         }
     }
@@ -245,10 +244,8 @@ final class AudioEngine {
             guard let hw = MasterVolume.get(on: device).map(Double.init),
                   let last = lastSetVolume[uid], abs(hw - last) > 0.01 else { continue }
             lastSetVolume[uid] = hw
-            guard masterVolume > 0.05, !masterMuted else { continue }
-            let sticker = min(hw / masterVolume, 1)
-            profile.devices[uid]?.masterVolume = sticker
-            onDeviceVolumeChanged?(uid, sticker)
+            profile.devices[uid]?.masterVolume = hw
+            onDeviceVolumeChanged?(uid, hw)
         }
     }
 
@@ -319,18 +316,20 @@ final class AudioEngine {
             let clips = profile.clips
                 .filter { $0.deviceUID == uid }
                 .map { DeviceSnapshot.ClipRange(id: $0.id, lower: $0.lower, upper: $0.upper) }
-            let level = masterVolume * settings.masterVolume
+            // Squared so the sliders feel like volume knobs.
+            let master = Float(masterVolume * masterVolume)
             var gain: Float
             if let device = hardware[uid] {
-                // Set the speaker's own volume; the signal goes out untouched.
-                if abs((lastSetVolume[uid] ?? -1) - level) > 0.002 {
-                    MasterVolume.set(Float32(level), on: device)
-                    lastSetVolume[uid] = MasterVolume.get(on: device).map(Double.init) ?? level
+                // The sticker is the speaker's own volume, one to one; the master is applied to the signal.
+                let sticker = settings.masterVolume
+                if abs((lastSetVolume[uid] ?? -1) - sticker) > 0.002 {
+                    MasterVolume.set(Float32(sticker), on: device)
+                    lastSetVolume[uid] = MasterVolume.get(on: device).map(Double.init) ?? sticker
                 }
-                gain = 1
+                gain = master
             } else {
-                // No volume control on the speaker: scale in software (squared to feel like a volume knob).
-                gain = Float(level * level)
+                // No volume control on the speaker: the sticker is applied to the signal too.
+                gain = master * Float(settings.masterVolume * settings.masterVolume)
             }
             if settings.muted || masterMuted { gain = 0 }
             if settings.invertPolarity == true { gain = -gain }
