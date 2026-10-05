@@ -101,15 +101,14 @@ struct DeviceSticker: View {
         }
         .padding(12)
         .frame(width: 250)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Theme.panelRaised)
-        )
+        .background(Theme.panelRaised)
+        // A plain strip, clipped by the card's corners below so it follows their curve.
         .overlay(alignment: .leading) {
-            UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10)
+            Rectangle()
                 .fill(color)
                 .frame(width: 4)
         }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(Theme.stroke)
