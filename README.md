@@ -29,7 +29,7 @@ Turn a Bluetooth speaker into a second subwoofer, add an EQ, and keep everything
 Requires **macOS 14.2+** and **Xcode** (or its command-line tools).
 
 ```sh
-git clone <this repo> && cd iMix
+git clone https://github.com/standon99/iMix.git && cd iMix
 ./scripts/install.sh      # builds and copies iMix.app to /Applications
 ```
 
