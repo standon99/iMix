@@ -11,6 +11,7 @@ struct ClipPaint: Equatable {
 /// The live spectrum (higher = louder) on a log frequency axis.
 /// Each clip's range is projected down in its colour; frequencies no clip covers are shaded red.
 struct SpectrumCanvas: View {
+    @Environment(WindowVisibility.self) private var visibility
     let feed: SpectrumFeed
     let clips: [ClipPaint]
     let uncovered: [ClosedRange<Double>]
@@ -19,7 +20,7 @@ struct SpectrumCanvas: View {
     static let bottomInset: CGFloat = 4
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: SpectrumScale.refreshInterval)) { timeline in
+        TimelineView(.animation(minimumInterval: SpectrumScale.refreshInterval, paused: !visibility.isVisible)) { timeline in
             Canvas { ctx, size in
                 let frame = feed.frame(at: timeline.date.timeIntervalSinceReferenceDate)
                 draw(frame, in: &ctx, size: size)

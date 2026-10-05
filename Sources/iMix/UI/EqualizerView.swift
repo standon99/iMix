@@ -153,13 +153,14 @@ private struct RegionBackgrounds: View {
 
 /// Grid, faint live spectrum, and the EQ's combined response curve.
 private struct EQCanvas: View {
+    @Environment(WindowVisibility.self) private var visibility
     let feed: SpectrumFeed
     let layout: EQLayout
     let curve: [(Double, Double)]
     let enabled: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: SpectrumScale.refreshInterval)) { timeline in
+        TimelineView(.animation(minimumInterval: SpectrumScale.refreshInterval, paused: !visibility.isVisible)) { timeline in
             Canvas { ctx, size in
                 drawGrid(&ctx, size)
                 drawSpectrum(feed.frame(at: timeline.date.timeIntervalSinceReferenceDate), &ctx, size)

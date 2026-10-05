@@ -11,6 +11,7 @@ struct MainView: View {
     @Environment(ProfileStore.self) private var store
     @Environment(AudioEngine.self) private var engine
     @AppStorage("page") private var page: Page = .mixer
+    @State private var visibility = WindowVisibility()
 
     var body: some View {
         Group {
@@ -26,6 +27,8 @@ struct MainView: View {
         }
         .padding(16)
         .background(Theme.background)
+        .background(WindowVisibilityReader(visibility: visibility))
+        .environment(visibility)
         .onAppear {
             // A speaker's volume changed outside iMix (e.g. Control Center): move its sticker to match.
             engine.onDeviceVolumeChanged = { uid, volume in

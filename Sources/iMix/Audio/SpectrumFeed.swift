@@ -12,8 +12,9 @@ protocol SpectrumFeed: AnyObject {
 }
 
 enum SpectrumScale {
-    /// The spectrum redraws 5 times a second: plenty to follow the music, at a fraction of the CPU of 60.
-    static let refreshInterval: TimeInterval = 1.0 / 5
+    /// The spectrum redraws 20 times a second: smooth enough to follow the music, at a fraction of the
+    /// CPU of 60. It doesn't draw at all while the window can't be seen (see `WindowVisibility`).
+    static let refreshInterval: TimeInterval = 1.0 / 20
     static let minDB: Float = -100
     static let maxDB: Float = 0
 }
