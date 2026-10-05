@@ -159,7 +159,7 @@ private struct EQCanvas: View {
     let enabled: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
+        TimelineView(.animation(minimumInterval: SpectrumScale.refreshInterval)) { timeline in
             Canvas { ctx, size in
                 drawGrid(&ctx, size)
                 drawSpectrum(feed.frame(at: timeline.date.timeIntervalSinceReferenceDate), &ctx, size)

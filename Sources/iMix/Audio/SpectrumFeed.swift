@@ -12,6 +12,8 @@ protocol SpectrumFeed: AnyObject {
 }
 
 enum SpectrumScale {
+    /// The spectrum redraws 5 times a second: plenty to follow the music, at a fraction of the CPU of 60.
+    static let refreshInterval: TimeInterval = 1.0 / 5
     static let minDB: Float = -100
     static let maxDB: Float = 0
 }
@@ -57,7 +59,7 @@ final class LiveSpectrumFeed: SpectrumFeed {
     }
 
     func frame(at time: TimeInterval) -> SpectrumFrame {
-        let dt = Float(min(max(time - (lastTime ?? time), 0), 0.1))
+        let dt = Float(min(max(time - (lastTime ?? time), 0), 0.5))
         lastTime = time
 
         computeBins()

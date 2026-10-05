@@ -175,8 +175,9 @@ final class AudioEngine {
         appTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.refreshApps()
         }
-        // Volume keys: poll often enough to feel immediate.
-        volumeTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        // Pick up speaker volumes changed in Control Center, and Accessibility being granted.
+        // Every 2 s keeps this cheap; the volume keys themselves are handled instantly by the key tap.
+        volumeTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.refreshVolume()
         }
     }

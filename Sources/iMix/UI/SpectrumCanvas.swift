@@ -19,7 +19,7 @@ struct SpectrumCanvas: View {
     static let bottomInset: CGFloat = 4
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60)) { timeline in
+        TimelineView(.animation(minimumInterval: SpectrumScale.refreshInterval)) { timeline in
             Canvas { ctx, size in
                 let frame = feed.frame(at: timeline.date.timeIntervalSinceReferenceDate)
                 draw(frame, in: &ctx, size: size)
