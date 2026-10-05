@@ -53,7 +53,8 @@ final class AudioEngine {
     // Each routed speaker's sticker *is* that speaker's own volume slider (the one Control Center
     // shows), one to one. The master is iMix's own: it turns the signal down in software, so it never
     // limits how far a speaker's own volume can go. While routing, iMix catches the keyboard volume
-    // keys (with Accessibility access) and uses them for the master.
+    // keys (with Accessibility access): up/down move every speaker's volume by the same step, and
+    // mute mutes everything.
 
     private(set) var masterVolume: Double = UserDefaults.standard.object(forKey: "masterVolume") as? Double ?? 1
     private(set) var masterMuted = false
@@ -90,12 +91,39 @@ final class AudioEngine {
         guard isDown else { return true }
         let step = fine ? 1.0 / 64 : 1.0 / 16
         switch key {
-        case .up: setMasterVolume(((masterVolume + step) / step).rounded() * step)
-        case .down: setMasterVolume(((masterVolume - step) / step).rounded() * step)
+        case .up: nudgeSpeakers(by: step)
+        case .down: nudgeSpeakers(by: -step)
         case .mute: toggleMasterMute()
         }
-        VolumeHUD.shared.show(volume: masterVolume, muted: masterMuted)
+        let levels = adjustableSpeakers.compactMap { profile.devices[$0]?.masterVolume }
+        VolumeHUD.shared.show(volume: levels.max() ?? masterVolume, muted: masterMuted)
         return true
+    }
+
+    /// Routed speakers the volume keys move: not muted and not set to 0.
+    private var adjustableSpeakers: [String] {
+        guard let session, session.key.routing else { return [] }
+        return session.key.outputs.filter { uid in
+            guard let settings = profile.devices[uid] else { return false }
+            return !settings.muted && settings.masterVolume > 0.001
+        }
+    }
+
+    /// Moves every speaker's own volume by the same amount, so their differences stay the same.
+    /// Stops at the point the loudest reaches 100% (or the quietest 0%) rather than squashing them.
+    private func nudgeSpeakers(by delta: Double) {
+        let speakers = adjustableSpeakers
+        let levels = speakers.compactMap { profile.devices[$0]?.masterVolume }
+        guard let highest = levels.max(), let lowest = levels.min() else { return }
+        let move = delta > 0 ? min(delta, 1 - highest) : -min(-delta, lowest)
+        guard abs(move) > 0.0005 else { return }
+        for uid in speakers {
+            guard let level = profile.devices[uid]?.masterVolume else { continue }
+            let newLevel = min(max(level + move, 0), 1)
+            profile.devices[uid]?.masterVolume = newLevel
+            onDeviceVolumeChanged?(uid, newLevel)
+        }
+        publishSnapshots()
     }
 
     /// Routed speakers whose volume iMix can set directly.

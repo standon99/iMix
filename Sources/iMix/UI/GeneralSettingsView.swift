@@ -40,7 +40,7 @@ struct GeneralSettingsView: View {
                     .font(.callout)
                 }
             } footer: {
-                Text("While routing, the volume keys change iMix's master volume instead of the Mac's output device. When routing is off they work as normal.")
+                Text("While routing, volume up and down move every speaker by the same amount, keeping the differences between them, and mute silences everything. When routing is off the keys work as normal.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

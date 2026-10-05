@@ -126,7 +126,7 @@ struct MasterVolumeControl: View {
                 .frame(width: 90)
         }
         .help(engine.volumeKeysAllowed
-              ? "Master volume: turns every speaker down together, on top of each speaker's own volume (its sticker). While routing, your keyboard volume keys control this."
+              ? "Master volume: turns every speaker down together, on top of each speaker's own volume (its sticker). The keyboard volume keys move the speakers themselves while routing."
               : "Master volume: turns every speaker down together, on top of each speaker's own volume (its sticker). To use the keyboard volume keys, allow iMix in Settings → General.")
     }
 

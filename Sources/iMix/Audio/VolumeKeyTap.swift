@@ -136,7 +136,7 @@ final class VolumeHUD {
             .frame(width: 220, height: 64)
             .background(RoundedRectangle(cornerRadius: 16).fill(Color(white: 0.12).opacity(0.92)))
             .overlay(alignment: .topLeading) {
-                Text("iMix")
+                Text("iMix · all speakers")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.45))
                     .padding(.leading, 18)
