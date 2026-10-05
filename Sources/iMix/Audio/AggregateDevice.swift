@@ -16,6 +16,8 @@ final class AggregateDevice {
 
     let id: AudioDeviceID
     let sampleRate: Double
+    /// Resampling quality of each sub-device and tap as Core Audio reports it (0x7F = max), for diagnostics.
+    let resamplingQuality: [UInt32]
     let subs: [SubLayout]
     /// Input buffers coming from the tap (after all sub-device inputs).
     let tapInputBuffers: Range<Int>
@@ -58,14 +60,18 @@ final class AggregateDevice {
             kAudioAggregateDeviceMainSubDeviceKey: subDeviceUIDs[0],
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
+            // Max-quality resampling: the default can soften the top end when rates differ.
             kAudioAggregateDeviceSubDeviceListKey: subDeviceUIDs.enumerated().map { index, uid in
-                [kAudioSubDeviceUIDKey: uid, kAudioSubDeviceDriftCompensationKey: index == 0 ? 0 : 1] as [String: Any]
+                [kAudioSubDeviceUIDKey: uid,
+                 kAudioSubDeviceDriftCompensationKey: index == 0 ? 0 : 1,
+                 kAudioSubDeviceDriftCompensationQualityKey: kAudioAggregateDriftCompensationMaxQuality] as [String: Any]
             },
         ]
         if let tapUUID {
             description[kAudioAggregateDeviceTapAutoStartKey] = true
             description[kAudioAggregateDeviceTapListKey] = [[
                 kAudioSubTapDriftCompensationKey: true,
+                kAudioSubTapDriftCompensationQualityKey: kAudioAggregateDriftCompensationMaxQuality,
                 kAudioSubTapUIDKey: tapUUID.uuidString,
             ]]
         }
@@ -74,6 +80,13 @@ final class AggregateDevice {
         try CoreAudioUtils.check(AudioHardwareCreateAggregateDevice(description as CFDictionary, &newID), "Creating aggregate device")
         id = newID
         sampleRate = CoreAudioUtils.float64(newID, kAudioDevicePropertyNominalSampleRate) ?? 48_000
+        // The aggregate's own sub-device and sub-tap objects carry the resampling settings.
+        resamplingQuality = CoreAudioUtils.objectList(newID, kAudioObjectPropertyOwnedObjects)
+            .filter {
+                let cls = CoreAudioUtils.uint32($0, kAudioObjectPropertyClass)
+                return cls == kAudioSubDeviceClassID || cls == kAudioSubTapClassID
+            }
+            .compactMap { CoreAudioUtils.uint32($0, kAudioSubDevicePropertyDriftCompensationQuality) }
 
         // Sub-device buffers appear in sub-device order; tap inputs follow them.
         var subs: [SubLayout] = []

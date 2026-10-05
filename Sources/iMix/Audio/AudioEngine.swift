@@ -212,6 +212,7 @@ final class AudioEngine {
             "outputs": session.key.outputs,
             "routing": session.key.routing,
             "sessionLog": sessionLog,
+            "resamplingQuality": session.resamplingQuality,
         ]
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("iMix/diagnostics.json")
@@ -438,6 +439,7 @@ private final class Session {
     var stats = Stats()
     private var expectedSampleTime: Double?
     var sampleRate: Double { aggregate.sampleRate }
+    var resamplingQuality: [UInt32] { aggregate.resamplingQuality }
 
     private let tap: ProcessTap
     private let aggregate: AggregateDevice
