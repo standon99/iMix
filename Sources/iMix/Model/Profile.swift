@@ -42,6 +42,9 @@ struct DeviceSettings: Codable, Hashable {
     var muted = false
     /// Measured by calibration; nil until calibrated.
     var latencyMs: Double?
+    /// Flip the signal for a speaker wired or built the opposite way to the others, so shared bass
+    /// adds up instead of cancelling. Optional so older profiles still decode.
+    var invertPolarity: Bool?
 
     var displayName: String { nickname?.isEmpty == false ? nickname! : name }
 }

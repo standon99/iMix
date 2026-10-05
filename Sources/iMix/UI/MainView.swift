@@ -26,6 +26,12 @@ struct MainView: View {
         }
         .padding(16)
         .background(Theme.background)
+        .onAppear {
+            // A speaker's volume changed outside iMix (e.g. Control Center): move its sticker to match.
+            engine.onDeviceVolumeChanged = { uid, volume in
+                store.updateDevice(uid) { $0.masterVolume = volume }
+            }
+        }
         .onChange(of: devices.outputs, initial: true) { _, outputs in
             store.register(outputs)
             engine.update(profile: store.profile, connected: outputs)

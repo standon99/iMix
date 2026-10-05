@@ -49,26 +49,63 @@ final class AudioEngine {
         }
     }
 
-    // MARK: Master volume
-    // Follows the volume of the Mac's current output device, which is what the keyboard volume keys
-    // change. That device already gets the change in hardware; every other output gets it in software.
+    // MARK: Volume
+    // Each routed speaker's sticker sets that speaker's own volume (the same one Control Center
+    // changes), so 100% means the speaker's full volume rather than a share of whatever macOS had it
+    // at. The master scales every speaker. The keyboard volume keys change the Mac's current output
+    // device, which iMix reads as the master. Speakers without a volume control get it in software.
 
-    private(set) var masterVolume: Double = 1
+    private(set) var masterVolume: Double = UserDefaults.standard.object(forKey: "masterVolume") as? Double ?? 1
     private(set) var masterMuted = false
     /// False when the current output (e.g. a Multi-Output Device) has no volume the keys can change.
     private(set) var masterFollowsKeys = false
-    @ObservationIgnored private var appVolume: Double = UserDefaults.standard.object(forKey: "appVolume") as? Double ?? 1
+    /// Called when a speaker's volume is changed outside iMix, with its new sticker value.
+    @ObservationIgnored var onDeviceVolumeChanged: ((String, Double) -> Void)?
+    /// Speaker volume iMix last wrote (as read back), to tell our changes from outside ones.
+    @ObservationIgnored private var lastSetVolume: [String: Double] = [:]
 
     func setMasterVolume(_ value: Double) {
-        let v = min(max(value, 0), 1)
-        if masterFollowsKeys, let device = CoreAudioUtils.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) {
-            MasterVolume.set(Float32(v), on: device)
-        } else {
-            appVolume = v
-            UserDefaults.standard.set(v, forKey: "appVolume")
+        setMaster(min(max(value, 0), 1))
+        // When the current output isn't one of the routed speakers, its volume *is* the master.
+        if masterFollowsKeys, !defaultOutputIsRouted,
+           let device = CoreAudioUtils.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) {
+            MasterVolume.set(Float32(masterVolume), on: device)
         }
-        masterVolume = v
         publishSnapshots()
+    }
+
+    private func setMaster(_ value: Double) {
+        masterVolume = value
+        UserDefaults.standard.set(value, forKey: "masterVolume")
+    }
+
+    private var defaultOutputIsRouted: Bool {
+        guard let uid = defaultOutputUID, let session, session.key.routing else { return false }
+        return session.key.outputs.contains(uid)
+    }
+
+    /// Routed speakers whose volume iMix can set directly.
+    private var hardwareVolumeOutputs: [(uid: String, device: AudioDeviceID)] {
+        guard let session, session.key.routing else { return [] }
+        return session.key.outputs.compactMap { uid in
+            guard let device = CoreAudioUtils.deviceID(forUID: uid), MasterVolume.isAvailable(on: device) else { return nil }
+            return (uid, device)
+        }
+    }
+
+    /// When routing starts, take each speaker's current volume as its sticker value, so nothing
+    /// suddenly gets louder.
+    private func adoptSpeakerVolumes() {
+        lastSetVolume = [:]
+        for (uid, device) in hardwareVolumeOutputs {
+            guard let hw = MasterVolume.get(on: device).map(Double.init) else { continue }
+            lastSetVolume[uid] = hw
+            let sticker = masterVolume > 0.05 ? min(hw / masterVolume, 1) : 1
+            if abs(sticker - (profile.devices[uid]?.masterVolume ?? 1)) > 0.01 {
+                profile.devices[uid]?.masterVolume = sticker
+                onDeviceVolumeChanged?(uid, sticker)
+            }
+        }
     }
 
     @ObservationIgnored let feed = LiveSpectrumFeed()
@@ -182,14 +219,35 @@ final class AudioEngine {
         guard let device = CoreAudioUtils.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) else { return }
         let uid = CoreAudioUtils.string(device, kAudioDevicePropertyDeviceUID)
         let followsKeys = MasterVolume.isAvailable(on: device)
-        let volume = followsKeys ? Double(MasterVolume.get(on: device) ?? 1) : appVolume
         let muted = followsKeys && MasterVolume.isMuted(device)
 
         var changed = false
         if uid != defaultOutputUID { defaultOutputUID = uid; changed = true }
         if followsKeys != masterFollowsKeys { masterFollowsKeys = followsKeys; changed = true }
-        if abs(volume - masterVolume) > 0.001 { masterVolume = volume; changed = true }
         if muted != masterMuted { masterMuted = muted; changed = true }
+
+        // Speaker volumes changed outside iMix (Control Center, or the volume keys on a routed speaker).
+        for (outputUID, outputDevice) in hardwareVolumeOutputs {
+            guard let hw = MasterVolume.get(on: outputDevice).map(Double.init),
+                  let last = lastSetVolume[outputUID], abs(hw - last) > 0.01 else { continue }
+            lastSetVolume[outputUID] = hw
+            let sticker = profile.devices[outputUID]?.masterVolume ?? 1
+            if outputUID == uid {
+                // The volume keys: scale the master so this speaker lands where the keys put it.
+                if sticker > 0.05 { setMaster(min(hw / sticker, 1)); changed = true }
+            } else if masterVolume > 0.05 {
+                let newSticker = min(hw / masterVolume, 1)
+                profile.devices[outputUID]?.masterVolume = newSticker
+                onDeviceVolumeChanged?(outputUID, newSticker)
+            }
+        }
+
+        // The current output isn't routed: its volume is the master.
+        if followsKeys, !defaultOutputIsRouted, let hw = MasterVolume.get(on: device).map(Double.init),
+           abs(hw - masterVolume) > 0.001 {
+            setMaster(hw)
+            changed = true
+        }
         if changed { publishSnapshots() }
     }
 
@@ -237,6 +295,7 @@ final class AudioEngine {
             routingActive = routing
             routedOutputs = key.outputs
             source = newSource
+            adoptSpeakerVolumes()
             publishSnapshots()
         } catch {
             routingActive = false
@@ -251,8 +310,7 @@ final class AudioEngine {
 
         let latencies = session.key.outputs.compactMap { profile.devices[$0]?.latencyMs }
         let slowest = latencies.max() ?? 0
-        // Squared so sliders feel closer to perceived loudness.
-        let master = masterMuted ? 0 : Float(masterVolume * masterVolume)
+        let hardware = Dictionary(uniqueKeysWithValues: hardwareVolumeOutputs.map { ($0.uid, $0.device) })
 
         var snapshots: [String: DeviceSnapshot] = [:]
         for uid in session.key.outputs {
@@ -260,9 +318,21 @@ final class AudioEngine {
             let clips = profile.clips
                 .filter { $0.deviceUID == uid }
                 .map { DeviceSnapshot.ClipRange(id: $0.id, lower: $0.lower, upper: $0.upper) }
-            // The current output device already gets the master volume in hardware.
-            let masterGain: Float = (masterFollowsKeys && uid == defaultOutputUID) ? 1 : master
-            let gain = settings.muted ? 0 : Float(settings.masterVolume * settings.masterVolume) * masterGain
+            let level = masterVolume * settings.masterVolume
+            var gain: Float
+            if let device = hardware[uid] {
+                // Set the speaker's own volume; the signal goes out untouched.
+                if abs((lastSetVolume[uid] ?? -1) - level) > 0.002 {
+                    MasterVolume.set(Float32(level), on: device)
+                    lastSetVolume[uid] = MasterVolume.get(on: device).map(Double.init) ?? level
+                }
+                gain = 1
+            } else {
+                // No volume control on the speaker: scale in software (squared to feel like a volume knob).
+                gain = Float(level * level)
+            }
+            if settings.muted || masterMuted { gain = 0 }
+            if settings.invertPolarity == true { gain = -gain }
             let delayMs = settings.latencyMs.map { slowest - $0 } ?? 0
             snapshots[uid] = DeviceSnapshot(
                 mode: settings.channel,

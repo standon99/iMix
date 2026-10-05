@@ -122,8 +122,8 @@ struct MasterVolumeControl: View {
                 .frame(width: 90)
         }
         .help(engine.masterFollowsKeys
-              ? "Master volume for all outputs. Your keyboard volume keys control this too."
-              : "Master volume for all outputs. Volume keys can't control it because the Mac's sound output is set to a device without a volume control (like a Multi-Output Device); pick a single device in Sound settings.")
+              ? "Master volume: scales every speaker. At 100%, each speaker plays at its own sticker volume. Your keyboard volume keys control this too."
+              : "Master volume: scales every speaker. Volume keys can't control it because the Mac's sound output is set to a device without a volume control (like a Multi-Output Device); pick a single device in Sound settings.")
     }
 
     private var icon: String {

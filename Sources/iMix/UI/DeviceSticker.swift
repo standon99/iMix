@@ -28,6 +28,11 @@ struct DeviceSticker: View {
                 if settings.nickname != nil {
                     Button("Reset Name") { store.updateDevice(uid) { $0.nickname = nil } }
                 }
+                Divider()
+                Toggle("Invert Polarity", isOn: Binding(
+                    get: { settings.invertPolarity == true },
+                    set: { on in store.updateDevice(uid) { $0.invertPolarity = on } }))
+                    .help("Flip this speaker's signal if its bass cancels with the others. Calibration sets this for you.")
                 if !isOnline {
                     Divider()
                     Button("Forget Device", role: .destructive) { store.forgetDevice(uid) }
@@ -95,6 +100,10 @@ struct DeviceSticker: View {
                 }
                 Text("·")
                 Text(settings.latencyMs.map { String(format: "%.0f ms", $0) } ?? "not calibrated")
+                if settings.invertPolarity == true {
+                    Text("·")
+                    Text("flipped")
+                }
             }
             .font(.caption)
             .foregroundStyle(Theme.textTertiary)

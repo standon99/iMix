@@ -142,8 +142,8 @@ struct CalibrationSettingsView: View {
                             .help("Loudness at the mic compared with the loudest output")
                     }
                     if isPolarityOutlier(result) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                            .help("This speaker's polarity is opposite to the others, so it may cancel bass where they overlap.")
+                        Text("Reversed").foregroundStyle(.orange)
+                            .help("This speaker pushes air when the others pull, so wherever they play the same bass it cancels out and sounds thin. Apply flips its signal to fix this.")
                     }
                     if result.detections < result.runs {
                         Text("\(result.detections)/\(result.runs)").foregroundStyle(.orange)
@@ -191,7 +191,7 @@ struct CalibrationSettingsView: View {
                 ProgressView(value: progress).frame(maxWidth: 260)
                 Text("Measuring…").font(.caption).foregroundStyle(.secondary)
             case .done:
-                Text("With Bluetooth in the mix, macOS buffers the wired outputs too, so every time reads high. Only the differences matter: that's the delay added.")
+                Text("Times include buffering macOS adds when Bluetooth is involved, so only the differences matter (the delay added). Apply also flips any speaker marked Reversed.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             case .failed(let message):
@@ -247,7 +247,12 @@ struct CalibrationSettingsView: View {
     private func apply() {
         for result in results.values {
             guard let latency = result.latencyMs else { continue }
-            store.updateDevice(result.uid) { $0.latencyMs = latency }
+            // Sweeps are played unflipped, so this is the speaker's own polarity.
+            let flip = isPolarityOutlier(result)
+            store.updateDevice(result.uid) {
+                $0.latencyMs = latency
+                $0.invertPolarity = flip
+            }
         }
         phase = .idle
     }

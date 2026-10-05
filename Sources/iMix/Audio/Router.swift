@@ -303,7 +303,7 @@ final class DeviceProgram {
     /// Renders `frames` of input into this device's buffers in `output` (already zeroed).
     func render(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frames: Int,
                 output: UnsafeMutableAudioBufferListPointer) {
-        guard !outputBuffers.isEmpty, gain > 0 || targetGain > 0 else { return }
+        guard !outputBuffers.isEmpty, gain != 0 || targetGain != 0 else { return }
         let totalChannels = outputChannels.reduce(0, +)
         // Device channels 0 and 1 (may live in the same interleaved buffer or two separate buffers).
         let ch0 = locate(channel: 0)
@@ -324,7 +324,7 @@ final class DeviceProgram {
             case .right: outL = Float(r); outR = Float(r)
             case .both: outL = Float(l); outR = Float(r)
             }
-            gain += gainStep
+            gain += gainStep // may be negative: inverted polarity
             outL *= gain
             outR *= gain
 
