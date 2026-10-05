@@ -20,21 +20,26 @@ struct SpectrumCanvas: View {
     static let bottomInset: CGFloat = 4
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: SpectrumScale.refreshInterval, paused: !visibility.isVisible)) { timeline in
+        ZStack {
+            // Grid, labels and red gaps only change when the clips do, so they're drawn once here
+            // instead of on every frame (redrawing the text was most of the spectrum's CPU cost).
             Canvas { ctx, size in
-                let frame = feed.frame(at: timeline.date.timeIntervalSinceReferenceDate)
-                draw(frame, in: &ctx, size: size)
+                for gap in uncovered {
+                    ctx.fill(Path(rect(for: gap.lowerBound, gap.upperBound, size: size)),
+                             with: .color(Theme.uncovered.opacity(0.13)))
+                }
+                drawGrid(in: &ctx, size: size)
+            }
+            TimelineView(.animation(minimumInterval: SpectrumScale.refreshInterval, paused: !visibility.isVisible)) { timeline in
+                Canvas { ctx, size in
+                    let frame = feed.frame(at: timeline.date.timeIntervalSinceReferenceDate)
+                    draw(frame, in: &ctx, size: size)
+                }
             }
         }
     }
 
     private func draw(_ frame: SpectrumFrame, in ctx: inout GraphicsContext, size: CGSize) {
-        for gap in uncovered {
-            ctx.fill(Path(rect(for: gap.lowerBound, gap.upperBound, size: size)),
-                     with: .color(Theme.uncovered.opacity(0.13)))
-        }
-
-        drawGrid(in: &ctx, size: size)
         let (fill, line) = curve(bins: frame.levels, size: size)
         let (_, peakLine) = curve(bins: frame.peaks, size: size)
 

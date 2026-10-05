@@ -160,12 +160,15 @@ private struct EQCanvas: View {
     let enabled: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: SpectrumScale.refreshInterval, paused: !visibility.isVisible)) { timeline in
-            Canvas { ctx, size in
-                drawGrid(&ctx, size)
-                drawSpectrum(feed.frame(at: timeline.date.timeIntervalSinceReferenceDate), &ctx, size)
-                drawCurve(&ctx)
+        // Only the live spectrum animates; the grid and the EQ curve are drawn once each.
+        ZStack {
+            Canvas { ctx, size in drawGrid(&ctx, size) }
+            TimelineView(.animation(minimumInterval: SpectrumScale.refreshInterval, paused: !visibility.isVisible)) { timeline in
+                Canvas { ctx, size in
+                    drawSpectrum(feed.frame(at: timeline.date.timeIntervalSinceReferenceDate), &ctx, size)
+                }
             }
+            Canvas { ctx, _ in drawCurve(&ctx) }
         }
         .allowsHitTesting(false)
     }
