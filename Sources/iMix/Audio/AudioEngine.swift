@@ -51,37 +51,51 @@ final class AudioEngine {
 
     // MARK: Volume
     // Each routed speaker's sticker sets that speaker's own volume (the same one Control Center
-    // changes), so 100% means the speaker's full volume rather than a share of whatever macOS had it
-    // at. The master scales every speaker. The keyboard volume keys change the Mac's current output
-    // device, which iMix reads as the master. Speakers without a volume control get it in software.
+    // changes), so 100% means the speaker's full volume. The master is iMix's own and scales every
+    // speaker; it's never tied to the Mac's output device. While routing, iMix catches the keyboard
+    // volume keys (with Accessibility access) and uses them for the master instead.
 
     private(set) var masterVolume: Double = UserDefaults.standard.object(forKey: "masterVolume") as? Double ?? 1
     private(set) var masterMuted = false
-    /// False when the current output (e.g. a Multi-Output Device) has no volume the keys can change.
-    private(set) var masterFollowsKeys = false
+    /// The user's choice; the keys are only caught while routing and with Accessibility access.
+    var volumeKeysEnabled: Bool = UserDefaults.standard.object(forKey: "volumeKeysEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(volumeKeysEnabled, forKey: "volumeKeysEnabled") }
+    }
+    private(set) var volumeKeysAllowed = VolumeKeyTap.isTrusted
     /// Called when a speaker's volume is changed outside iMix, with its new sticker value.
     @ObservationIgnored var onDeviceVolumeChanged: ((String, Double) -> Void)?
     /// Speaker volume iMix last wrote (as read back), to tell our changes from outside ones.
     @ObservationIgnored private var lastSetVolume: [String: Double] = [:]
+    @ObservationIgnored private let volumeKeys = VolumeKeyTap()
 
     func setMasterVolume(_ value: Double) {
-        setMaster(min(max(value, 0), 1))
-        // When the current output isn't one of the routed speakers, its volume *is* the master.
-        if masterFollowsKeys, !defaultOutputIsRouted,
-           let device = CoreAudioUtils.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) {
-            MasterVolume.set(Float32(masterVolume), on: device)
-        }
+        masterVolume = min(max(value, 0), 1)
+        UserDefaults.standard.set(masterVolume, forKey: "masterVolume")
+        if masterMuted && masterVolume > 0 { masterMuted = false }
         publishSnapshots()
     }
 
-    private func setMaster(_ value: Double) {
-        masterVolume = value
-        UserDefaults.standard.set(value, forKey: "masterVolume")
+    func toggleMasterMute() {
+        masterMuted.toggle()
+        publishSnapshots()
     }
 
-    private var defaultOutputIsRouted: Bool {
-        guard let uid = defaultOutputUID, let session, session.key.routing else { return false }
-        return session.key.outputs.contains(uid)
+    /// Asks macOS for Accessibility access (needed to catch the volume keys).
+    func requestVolumeKeyAccess() {
+        VolumeKeyTap.requestTrust()
+    }
+
+    private func handleVolumeKey(_ key: VolumeKeyTap.Key, isDown: Bool, fine: Bool) -> Bool {
+        guard volumeKeysEnabled, routingActive else { return false }
+        guard isDown else { return true }
+        let step = fine ? 1.0 / 64 : 1.0 / 16
+        switch key {
+        case .up: setMasterVolume(((masterVolume + step) / step).rounded() * step)
+        case .down: setMasterVolume(((masterVolume - step) / step).rounded() * step)
+        case .mute: toggleMasterMute()
+        }
+        VolumeHUD.shared.show(volume: masterVolume, muted: masterMuted)
+        return true
     }
 
     /// Routed speakers whose volume iMix can set directly.
@@ -120,11 +134,14 @@ final class AudioEngine {
     /// passed in the profile and connected devices, so launch doesn't build a throwaway session first.
     @ObservationIgnored private var started = false
     @ObservationIgnored private var hasDevices = false
-    @ObservationIgnored private var defaultOutputUID: String?
 
     func start() {
         guard appTimer == nil else { return }
         started = true
+        volumeKeys.handler = { [weak self] key, isDown, fine in
+            self?.handleVolumeKey(key, isDown: isDown, fine: fine) ?? false
+        }
+        volumeKeys.start()
         refreshApps()
         refreshVolume()
         // Apps start and stop playing at any time; re-check every couple of seconds.
@@ -216,39 +233,23 @@ final class AudioEngine {
     }
 
     private func refreshVolume() {
-        guard let device = CoreAudioUtils.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) else { return }
-        let uid = CoreAudioUtils.string(device, kAudioDevicePropertyDeviceUID)
-        let followsKeys = MasterVolume.isAvailable(on: device)
-        let muted = followsKeys && MasterVolume.isMuted(device)
-
-        var changed = false
-        if uid != defaultOutputUID { defaultOutputUID = uid; changed = true }
-        if followsKeys != masterFollowsKeys { masterFollowsKeys = followsKeys; changed = true }
-        if muted != masterMuted { masterMuted = muted; changed = true }
-
-        // Speaker volumes changed outside iMix (Control Center, or the volume keys on a routed speaker).
-        for (outputUID, outputDevice) in hardwareVolumeOutputs {
-            guard let hw = MasterVolume.get(on: outputDevice).map(Double.init),
-                  let last = lastSetVolume[outputUID], abs(hw - last) > 0.01 else { continue }
-            lastSetVolume[outputUID] = hw
-            let sticker = profile.devices[outputUID]?.masterVolume ?? 1
-            if outputUID == uid {
-                // The volume keys: scale the master so this speaker lands where the keys put it.
-                if sticker > 0.05 { setMaster(min(hw / sticker, 1)); changed = true }
-            } else if masterVolume > 0.05 {
-                let newSticker = min(hw / masterVolume, 1)
-                profile.devices[outputUID]?.masterVolume = newSticker
-                onDeviceVolumeChanged?(outputUID, newSticker)
-            }
+        // Accessibility can be granted at any time in System Settings.
+        let allowed = VolumeKeyTap.isTrusted
+        if allowed != volumeKeysAllowed {
+            volumeKeysAllowed = allowed
+            if allowed { volumeKeys.start() }
         }
 
-        // The current output isn't routed: its volume is the master.
-        if followsKeys, !defaultOutputIsRouted, let hw = MasterVolume.get(on: device).map(Double.init),
-           abs(hw - masterVolume) > 0.001 {
-            setMaster(hw)
-            changed = true
+        // Speaker volumes changed outside iMix (Control Center): move the matching sticker.
+        for (uid, device) in hardwareVolumeOutputs {
+            guard let hw = MasterVolume.get(on: device).map(Double.init),
+                  let last = lastSetVolume[uid], abs(hw - last) > 0.01 else { continue }
+            lastSetVolume[uid] = hw
+            guard masterVolume > 0.05, !masterMuted else { continue }
+            let sticker = min(hw / masterVolume, 1)
+            profile.devices[uid]?.masterVolume = sticker
+            onDeviceVolumeChanged?(uid, sticker)
         }
-        if changed { publishSnapshots() }
     }
 
     // MARK: Session management

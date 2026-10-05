@@ -1,8 +1,9 @@
 import ServiceManagement
 import SwiftUI
 
-/// App-wide preferences: currently, opening iMix at login.
+/// App-wide preferences: opening at login, and using the volume keys for iMix.
 struct GeneralSettingsView: View {
+    @Environment(AudioEngine.self) private var engine
     @State private var status = SMAppService.mainApp.status
     @State private var error: String?
 
@@ -23,6 +24,23 @@ struct GeneralSettingsView: View {
                 }
             } footer: {
                 Text("iMix starts with your Mac and picks up where you left off, including routing if it was on.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                @Bindable var engine = engine
+                Toggle("Use the volume keys for iMix while routing", isOn: $engine.volumeKeysEnabled)
+                if !engine.volumeKeysAllowed {
+                    HStack {
+                        Text("iMix needs Accessibility access to catch the volume keys.")
+                            .foregroundStyle(.orange)
+                        Button("Allow…") { engine.requestVolumeKeyAccess() }
+                    }
+                    .font(.callout)
+                }
+            } footer: {
+                Text("While routing, the volume keys change iMix's master volume instead of the Mac's output device. When routing is off they work as normal.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
