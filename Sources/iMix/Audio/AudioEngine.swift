@@ -242,6 +242,20 @@ final class AudioEngine {
             "routing": session.key.routing,
             "sessionLog": sessionLog,
             "resamplingQuality": session.resamplingQuality,
+            // Per speaker since the last write: loudest sample before the limiter (0 dB = full scale),
+            // samples the limiter turned down, and samples that still clipped (should be 0).
+            "outputLevels": Dictionary(uniqueKeysWithValues: session.routers.flatMap(\.programs).map { program in
+                let entry: [String: Any] = [
+                    "peakDBFS": (20 * log10(Double(max(program.peak, 1e-9))) * 10).rounded() / 10,
+                    "limitedSamples": program.limited,
+                    "clippedSamples": program.overs,
+                ]
+                program.peak = 0
+                program.limited = 0
+                program.overs = 0
+                return (program.uid, entry)
+            }),
+            "inputPeakDBFS": (20 * log10(Double(max(session.inputPeak, 1e-9))) * 10).rounded() / 10,
         ]
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("iMix/diagnostics.json")
@@ -462,6 +476,12 @@ private final class Session {
     var routers: [Router] { links.compactMap(\.router) }
     var sampleRate: Double { links.first?.sampleRate ?? 48_000 }
     var resamplingQuality: [UInt32] { links.flatMap(\.resamplingQuality) }
+    /// Loudest captured sample since the last read (resets on read).
+    var inputPeak: Float {
+        let peak = links.map(\.inputPeak).max() ?? 0
+        for link in links { link.inputPeak = 0 }
+        return peak
+    }
 
     /// Combined audio-thread health across links.
     var stats: OutputLink.Stats {
@@ -513,6 +533,7 @@ private final class OutputLink {
         var discontinuities = 0
     }
     var stats = Stats()
+    var inputPeak: Float = 0
     private var expectedSampleTime: Double?
 
     private let tap: ProcessTap
@@ -600,6 +621,11 @@ private final class OutputLink {
                 left[i] = samples[i]
                 right[i] = samples[i]
             }
+        }
+
+        for i in 0..<frames {
+            let loudest = max(abs(left[i]), abs(right[i]))
+            if loudest > inputPeak { inputPeak = loudest }
         }
 
         // Routing applies the EQ in place first, so the spectrum shows what's actually playing.

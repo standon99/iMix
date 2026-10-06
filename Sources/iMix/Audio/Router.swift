@@ -263,6 +263,21 @@ final class DeviceProgram {
     let outputBuffers: Range<Int>
     let outputChannels: [Int]
 
+    /// Loudest sample before the limiter since the last reset, how many samples the limiter had to
+    /// turn down, and how many still went over full scale after it (should stay 0). Diagnostics only;
+    /// read racily from the main thread.
+    var peak: Float = 0
+    var limited = 0
+    var overs = 0
+
+    /// Safety limiter: captured audio can exceed full scale (apps and macOS mix in floating point and
+    /// normally rely on the speaker's volume to bring it down), which the speaker would clip harshly.
+    /// Peaks above the ceiling are turned down instantly and the gain recovers over ~150 ms; anything
+    /// quieter passes untouched.
+    private static let ceiling: Float = 0.98
+    private var limiterGain: Float = 1
+    private var limiterRelease: Float = 0.0002
+
     private var mode: ChannelMode = .both
     private var targetGain: Float = 0
     private var gain: Float = 0
@@ -290,6 +305,7 @@ final class DeviceProgram {
         }
         mode = snapshot.mode
         targetGain = snapshot.gain
+        limiterRelease = Float(1 - exp(-1 / (0.15 * sampleRate)))
         delaySamples = min(max(Int((snapshot.delayMs / 1000 * sampleRate).rounded()), 0), Self.maxDelay - 1)
         var next: [UUID: ClipFilter] = [:]
         filters = snapshot.clips.compactMap { clip in
@@ -336,6 +352,18 @@ final class DeviceProgram {
             outR = delayR[readIndex]
             delayIndex = (delayIndex + 1) & (Self.maxDelay - 1)
 
+            let loudest = max(abs(outL), abs(outR))
+            if loudest > peak { peak = loudest }
+            if loudest * limiterGain > Self.ceiling {
+                limiterGain = Self.ceiling / loudest
+                limited += 1
+            } else {
+                limiterGain += (1 - limiterGain) * limiterRelease
+            }
+            outL *= limiterGain
+            outR *= limiterGain
+            if max(abs(outL), abs(outR)) > 1 { overs += 1 }
+
             if let ch1 {
                 write(outL, at: ch0, frame: i, output)
                 write(outR, at: ch1, frame: i, output)
@@ -367,7 +395,7 @@ final class DeviceProgram {
 /// picks them up at the start of the next buffer.
 final class Router {
     let sampleRate: Double
-    private let programs: [DeviceProgram]
+    let programs: [DeviceProgram]
     private let eq = GraphicEQ()
     private let lock = NSLock()
     private var pending: [String: DeviceSnapshot]?
