@@ -191,7 +191,7 @@ struct CalibrationSettingsView: View {
                 ProgressView(value: progress).frame(maxWidth: 260)
                 Text("Measuring…").font(.caption).foregroundStyle(.secondary)
             case .done:
-                Text("Times include buffering macOS adds when Bluetooth is involved, so only the differences matter (the delay added). Apply also flips any speaker marked Reversed.")
+                Text("Only the differences between speakers matter: that's the delay added to the faster ones. Apply also flips any speaker marked Reversed.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             case .failed(let message):
@@ -227,8 +227,9 @@ struct CalibrationSettingsView: View {
             do {
                 // Let the router's devices settle before taking them over.
                 try await Task.sleep(for: .milliseconds(300))
-                let run = try CalibrationRun(outputUIDs: outputs, micUID: mic.uid)
-                let measured = try await run.perform { progress in phase = .running(progress) }
+                let measured = try await CalibrationRun.measureEach(outputUIDs: outputs, micUID: mic.uid) { progress in
+                    phase = .running(progress)
+                }
                 results = Dictionary(uniqueKeysWithValues: measured.map { ($0.uid, $0) })
                 phase = .done
             } catch is CancellationError {

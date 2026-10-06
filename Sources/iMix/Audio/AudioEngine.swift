@@ -333,8 +333,7 @@ final class AudioEngine {
     }
 
     private func publishSnapshots() {
-        guard let session, let router = session.router else { return }
-        let sampleRate = router.sampleRate
+        guard let session, !session.routers.isEmpty else { return }
 
         let latencies = session.key.outputs.compactMap { profile.devices[$0]?.latencyMs }
         let slowest = latencies.max() ?? 0
@@ -367,10 +366,11 @@ final class AudioEngine {
             snapshots[uid] = DeviceSnapshot(
                 mode: settings.channel,
                 gain: gain,
-                delaySamples: Int((delayMs / 1000 * sampleRate).rounded()),
+                delayMs: delayMs,
                 clips: clips)
         }
-        router.publish(snapshots, eq: EQSnapshot(profile.eq))
+        let eq = EQSnapshot(profile.eq)
+        for router in session.routers { router.publish(snapshots, eq: eq) }
     }
 }
 
@@ -440,8 +440,13 @@ enum AppDiscovery {
     }
 }
 
-/// One running tap + aggregate device + IO callback. Torn down and rebuilt when the set of
-/// devices or the tapped processes change; clip and sticker edits are pushed into its router live.
+/// The running audio: one `OutputLink` per routed speaker (or a single listen-only link). Torn down
+/// and rebuilt when the set of speakers or the tapped processes change; clip and sticker edits are
+/// pushed into the links' routers live.
+///
+/// Each speaker gets its own tap and its own aggregate, clocked by that speaker. Putting every
+/// speaker in one aggregate made macOS buffer the wired ones to match Bluetooth (hundreds of ms),
+/// and calibration then delayed everything to that inflated figure.
 private final class Session {
     struct Key: Equatable {
         /// Empty = whole system.
@@ -452,7 +457,49 @@ private final class Session {
     }
 
     let key: Key
+    private let links: [OutputLink]
+
+    var routers: [Router] { links.compactMap(\.router) }
+    var sampleRate: Double { links.first?.sampleRate ?? 48_000 }
+    var resamplingQuality: [UInt32] { links.flatMap(\.resamplingQuality) }
+
+    /// Combined audio-thread health across links.
+    var stats: OutputLink.Stats {
+        get {
+            links.reduce(into: OutputLink.Stats()) { total, link in
+                total.callbacks += link.stats.callbacks
+                total.framesPerCallback = max(total.framesPerCallback, link.stats.framesPerCallback)
+                total.maxLoad = max(total.maxLoad, link.stats.maxLoad)
+                total.heavyCallbacks += link.stats.heavyCallbacks
+                total.discontinuities += link.stats.discontinuities
+            }
+        }
+        set { for link in links { link.stats.maxLoad = newValue.maxLoad } }
+    }
+
+    init(key: Key, ring: SampleRing) throws {
+        self.key = key
+        if key.routing, !key.outputs.isEmpty {
+            // The first link also feeds the spectrum.
+            links = try key.outputs.enumerated().map { index, uid in
+                try OutputLink(key: key, deviceUID: uid, ring: index == 0 ? ring : nil)
+            }
+        } else {
+            // Spectrum only, or routing with nothing on the timeline: the default output is just a clock.
+            guard let device = CoreAudioUtils.defaultDevice(kAudioHardwarePropertyDefaultSystemOutputDevice),
+                  let uid = CoreAudioUtils.string(device, kAudioDevicePropertyDeviceUID) else {
+                throw CoreAudioUtils.Failure(step: "Finding default output", status: -1)
+            }
+            links = [try OutputLink(key: key, deviceUID: uid, ring: ring)]
+        }
+    }
+}
+
+/// One tap + one aggregate (a single speaker as its clock) + IO callback.
+private final class OutputLink {
     let router: Router?
+    var sampleRate: Double { aggregate.sampleRate }
+    var resamplingQuality: [UInt32] { aggregate.resamplingQuality }
 
     /// Audio-thread health, read (racily, it's only diagnostics) by the engine.
     struct Stats {
@@ -467,40 +514,26 @@ private final class Session {
     }
     var stats = Stats()
     private var expectedSampleTime: Double?
-    var sampleRate: Double { aggregate.sampleRate }
-    var resamplingQuality: [UInt32] { aggregate.resamplingQuality }
 
     private let tap: ProcessTap
     private let aggregate: AggregateDevice
-    private let ring: SampleRing
+    /// Only the link that feeds the spectrum has one.
+    private let ring: SampleRing?
     private let queue = DispatchQueue(label: "iMix.audio", qos: .userInteractive)
     private var left = [Float](repeating: 0, count: 8192)
     private var right = [Float](repeating: 0, count: 8192)
     private var mono = [Float](repeating: 0, count: 8192)
 
-    init(key: Key, ring: SampleRing) throws {
-        self.key = key
+    init(key: Session.Key, deviceUID: String, ring: SampleRing?) throws {
         self.ring = ring
         tap = try ProcessTap(processes: key.processes, excluding: key.excluded, muted: key.routing)
-
-        var subDevices = key.outputs
-        if subDevices.isEmpty {
-            // Nothing to play through (spectrum only, or routing with no clips): just use the default output as the clock.
-            guard let device = CoreAudioUtils.defaultDevice(kAudioHardwarePropertyDefaultSystemOutputDevice),
-                  let uid = CoreAudioUtils.string(device, kAudioDevicePropertyDeviceUID) else {
-                throw CoreAudioUtils.Failure(step: "Finding default output", status: -1)
-            }
-            subDevices = [uid]
-        }
-        let bufferFrames = key.routing ? AggregateDevice.bufferFrames(for: subDevices) : nil
-        aggregate = try AggregateDevice(name: "iMix", subDeviceUIDs: subDevices, tapUUID: tap.uuid)
+        let bufferFrames = key.routing ? AggregateDevice.bufferFrames(for: [deviceUID]) : nil
+        aggregate = try AggregateDevice(name: "iMix", subDeviceUIDs: [deviceUID], tapUUID: tap.uuid)
         if let bufferFrames { aggregate.setBufferFrameSize(bufferFrames) }
 
-        if key.routing {
-            let programs = aggregate.subs
-                .filter { key.outputs.contains($0.uid) }
-                .map { DeviceProgram(uid: $0.uid, outputBuffers: $0.outputBuffers, outputChannels: $0.outputChannels) }
-            router = Router(programs: programs, sampleRate: aggregate.sampleRate)
+        if key.routing, key.outputs.contains(deviceUID), let sub = aggregate.subs.first {
+            let program = DeviceProgram(uid: deviceUID, outputBuffers: sub.outputBuffers, outputChannels: sub.outputChannels)
+            router = Router(programs: [program], sampleRate: aggregate.sampleRate)
         } else {
             router = nil
         }
@@ -578,8 +611,10 @@ private final class Session {
             }
         }
 
-        for i in 0..<frames { mono[i] = (left[i] + right[i]) * 0.5 }
-        mono.withUnsafeBufferPointer { ring.write($0.baseAddress!, count: frames) }
+        if let ring {
+            for i in 0..<frames { mono[i] = (left[i] + right[i]) * 0.5 }
+            mono.withUnsafeBufferPointer { ring.write($0.baseAddress!, count: frames) }
+        }
         return frames
     }
 }

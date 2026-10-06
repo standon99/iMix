@@ -242,15 +242,16 @@ struct DeviceSnapshot {
 
     var mode: ChannelMode
     var gain: Float
-    var delaySamples: Int
+    /// Converted to samples by each link's router, since links can run at different rates.
+    var delayMs: Double
     var clips: [ClipRange]
     /// Fresh filters for any clip the audio thread hasn't seen yet (so it never allocates them itself).
     var spareFilters: [UUID: ClipFilter]
 
-    init(mode: ChannelMode, gain: Float, delaySamples: Int, clips: [ClipRange]) {
+    init(mode: ChannelMode, gain: Float, delayMs: Double, clips: [ClipRange]) {
         self.mode = mode
         self.gain = gain
-        self.delaySamples = delaySamples
+        self.delayMs = delayMs
         self.clips = clips
         spareFilters = Dictionary(uniqueKeysWithValues: clips.map { ($0.id, ClipFilter()) })
     }
@@ -289,7 +290,7 @@ final class DeviceProgram {
         }
         mode = snapshot.mode
         targetGain = snapshot.gain
-        delaySamples = min(max(snapshot.delaySamples, 0), Self.maxDelay - 1)
+        delaySamples = min(max(Int((snapshot.delayMs / 1000 * sampleRate).rounded()), 0), Self.maxDelay - 1)
         var next: [UUID: ClipFilter] = [:]
         filters = snapshot.clips.compactMap { clip in
             guard let filter = filtersByID[clip.id] ?? snapshot.spareFilters[clip.id] else { return nil }

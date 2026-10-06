@@ -76,8 +76,23 @@ final class CalibrationRun {
         recording = Array(repeating: 0, count: totalFrames + sweep.count)
     }
 
+    /// Measures each output on its own, in an aggregate of just that speaker (as the clock) and the
+    /// mic, the same way routing gives each speaker its own aggregate. `progress` covers all of them.
+    static func measureEach(outputUIDs: [String], micUID: String,
+                            progress: @MainActor @escaping (Double) -> Void) async throws -> [CalibrationResult] {
+        var results: [CalibrationResult] = []
+        for (index, uid) in outputUIDs.enumerated() {
+            let run = try CalibrationRun(outputUIDs: [uid], micUID: micUID)
+            let count = Double(outputUIDs.count)
+            results += try await run.perform { fraction in progress((Double(index) + fraction) / count) }
+            // Give the speaker a moment to go quiet before the next one starts.
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        return results
+    }
+
     static func totalSeconds(_ devices: Int) -> Double {
-        warmupSeconds + Double(devices * runsPerDevice) * (sweepSeconds + gapSeconds) + maxLatencySeconds
+        Double(devices) * (warmupSeconds + Double(runsPerDevice) * (sweepSeconds + gapSeconds) + maxLatencySeconds + 0.2)
     }
 
     /// Runs the measurement. `progress` is called on the main actor with 0...1.
@@ -377,9 +392,7 @@ enum CalibrationCommandLine {
                     let wanted = args[o + 1].split(separator: ",").map(String.init)
                     uids = uids.filter { uid in wanted.contains { uid.localizedCaseInsensitiveContains($0) } }
                 }
-                let run = try CalibrationRun(outputUIDs: uids, micUID: mic.uid)
-                let results = try await run.perform { _ in }
-                report["sampleRate"] = run.sampleRate
+                let results = try await CalibrationRun.measureEach(outputUIDs: uids, micUID: mic.uid) { _ in }
                 report["mic"] = mic.name
                 report["results"] = results.map { r -> [String: Any] in
                     ["uid": r.uid, "latencyMs": r.latencyMs ?? -1, "jitterMs": r.jitterMs ?? -1,
