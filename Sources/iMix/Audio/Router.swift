@@ -287,6 +287,12 @@ final class DeviceProgram {
     private var delayL: [Float]
     private var delayR: [Float]
     private var delayIndex = 0
+    /// When the delay changes while playing (applying a calibration with Route on), the old read
+    /// position fades out over `fadeLength` samples instead of jumping, which clicked.
+    private var fadingFrom = 0
+    private var fadeLeft = 0
+    private var fadeLength = 1
+    private var delaySet = false
     static let maxDelay = 1 << 16
 
     init(uid: String, outputBuffers: Range<Int>, outputChannels: [Int]) {
@@ -306,7 +312,17 @@ final class DeviceProgram {
         mode = snapshot.mode
         targetGain = snapshot.gain
         limiterRelease = Float(1 - exp(-1 / (0.15 * sampleRate)))
-        delaySamples = min(max(Int((snapshot.delayMs / 1000 * sampleRate).rounded()), 0), Self.maxDelay - 1)
+        let delay = min(max(Int((snapshot.delayMs / 1000 * sampleRate).rounded()), 0), Self.maxDelay - 1)
+        if !delaySet {
+            // Nothing has played yet, so there's nothing to fade.
+            delaySamples = delay
+            delaySet = true
+        } else if delay != delaySamples {
+            fadingFrom = delaySamples
+            delaySamples = delay
+            fadeLength = max(Int(0.025 * sampleRate), 1)
+            fadeLeft = fadeLength
+        }
         var next: [UUID: ClipFilter] = [:]
         filters = snapshot.clips.compactMap { clip in
             guard let filter = filtersByID[clip.id] ?? snapshot.spareFilters[clip.id] else { return nil }
@@ -350,6 +366,13 @@ final class DeviceProgram {
             let readIndex = (delayIndex - delay + Self.maxDelay) & (Self.maxDelay - 1)
             outL = delayL[readIndex]
             outR = delayR[readIndex]
+            if fadeLeft > 0 {
+                let w = Float(fadeLeft) / Float(fadeLength) // weight of the old position
+                let oldIndex = (delayIndex - fadingFrom + Self.maxDelay) & (Self.maxDelay - 1)
+                outL += (delayL[oldIndex] - outL) * w
+                outR += (delayR[oldIndex] - outR) * w
+                fadeLeft -= 1
+            }
             delayIndex = (delayIndex + 1) & (Self.maxDelay - 1)
 
             let loudest = max(abs(outL), abs(outR))

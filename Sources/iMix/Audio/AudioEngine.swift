@@ -256,6 +256,8 @@ final class AudioEngine {
                 return (program.uid, entry)
             }),
             "inputPeakDBFS": (20 * log10(Double(max(session.inputPeak, 1e-9))) * 10).rounded() / 10,
+            // Per speaker: time from capturing audio to handing it to the speaker, added on top of calibration.
+            "captureToOutputMs": session.captureToOutputMs.mapValues { ($0 * 100).rounded() / 100 },
         ]
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("iMix/diagnostics.json")
@@ -349,8 +351,16 @@ final class AudioEngine {
     private func publishSnapshots() {
         guard let session, !session.routers.isEmpty else { return }
 
-        let latencies = session.key.outputs.compactMap { profile.devices[$0]?.latencyMs }
-        let slowest = latencies.max() ?? 0
+        // Each speaker's total lag: calibration measures from the moment audio is handed to the speaker
+        // (device + air + mic), so add the time its link takes from capturing the audio to handing it
+        // over. That differs a lot between speakers: two IO buffers plus safety offsets, at each
+        // speaker's own buffer size and rate (Bluetooth: 1024 frames at 44.1 kHz = 46 ms; MacBook
+        // speakers: 512 at 96 kHz = 13 ms).
+        let paths = session.captureToOutputMs
+        func lag(_ uid: String) -> Double? {
+            profile.devices[uid]?.latencyMs.map { $0 + (paths[uid] ?? 0) }
+        }
+        let slowest = session.key.outputs.compactMap(lag).max() ?? 0
         let hardware = Dictionary(uniqueKeysWithValues: hardwareVolumeOutputs.map { ($0.uid, $0.device) })
 
         var snapshots: [String: DeviceSnapshot] = [:]
@@ -376,7 +386,7 @@ final class AudioEngine {
             }
             if settings.muted || masterMuted { gain = 0 }
             if settings.invertPolarity == true { gain = -gain }
-            let delayMs = settings.latencyMs.map { slowest - $0 } ?? 0
+            let delayMs = lag(uid).map { slowest - $0 } ?? 0
             snapshots[uid] = DeviceSnapshot(
                 mode: settings.channel,
                 gain: gain,
@@ -474,6 +484,10 @@ private final class Session {
     private let links: [OutputLink]
 
     var routers: [Router] { links.compactMap(\.router) }
+    /// Per routed speaker: ms from capturing audio to handing it to the speaker.
+    var captureToOutputMs: [String: Double] {
+        Dictionary(links.filter { $0.router != nil }.map { ($0.uid, $0.captureToOutputMs) }, uniquingKeysWith: { a, _ in a })
+    }
     var sampleRate: Double { links.first?.sampleRate ?? 48_000 }
     var resamplingQuality: [UInt32] { links.flatMap(\.resamplingQuality) }
     /// Loudest captured sample since the last read (resets on read).
@@ -517,7 +531,12 @@ private final class Session {
 
 /// One tap + one aggregate (a single speaker as its clock) + IO callback.
 private final class OutputLink {
+    let uid: String
     let router: Router?
+    /// Time from the tap's input time stamp to the output time stamp of the same IO cycle, i.e. from
+    /// capturing audio to handing it to the speaker. Predicted from the aggregate's settings, then
+    /// measured on every callback (read racily; an aligned Double).
+    var captureToOutputMs: Double
     var sampleRate: Double { aggregate.sampleRate }
     var resamplingQuality: [UInt32] { aggregate.resamplingQuality }
 
@@ -546,6 +565,7 @@ private final class OutputLink {
     private var mono = [Float](repeating: 0, count: 8192)
 
     init(key: Session.Key, deviceUID: String, ring: SampleRing?) throws {
+        uid = deviceUID
         self.ring = ring
         tap = try ProcessTap(processes: key.processes, excluding: key.excluded, muted: key.routing)
         let bufferFrames = key.routing ? AggregateDevice.bufferFrames(for: [deviceUID]) : nil
@@ -558,9 +578,17 @@ private final class OutputLink {
         } else {
             router = nil
         }
+        // Input is a buffer behind and output a buffer ahead, each plus its safety offset. Matches what
+        // the callback measures (MacBook speakers 1270 frames at 96 kHz, a Sony speaker 2048 at 44.1 kHz).
+        let buffer = CoreAudioUtils.uint32(aggregate.id, kAudioDevicePropertyBufferFrameSize) ?? 512
+        let safety = (CoreAudioUtils.uint32(aggregate.id, kAudioDevicePropertySafetyOffset, scope: kAudioObjectPropertyScopeInput) ?? 0)
+            + (CoreAudioUtils.uint32(aggregate.id, kAudioDevicePropertySafetyOffset, scope: kAudioObjectPropertyScopeOutput) ?? 0)
+        captureToOutputMs = Double(2 * buffer + safety) / aggregate.sampleRate * 1000
 
-        try aggregate.start(queue: queue, inputBuffers: Set(aggregate.tapInputBuffers)) { [unowned self] _, input, _, output, outTime in
+        let sampleRate = aggregate.sampleRate
+        try aggregate.start(queue: queue, inputBuffers: Set(aggregate.tapInputBuffers)) { [unowned self] _, input, inTime, output, outTime in
             let start = mach_absolute_time()
+            self.captureToOutputMs = (outTime.pointee.mSampleTime - inTime.pointee.mSampleTime) / sampleRate * 1000
             let frames = self.process(input: input, output: output)
             self.record(start: start, frames: frames, sampleTime: outTime.pointee.mSampleTime)
         }
