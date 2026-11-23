@@ -3,7 +3,9 @@ import SwiftUI
 
 @main
 struct IMixApp: App {
-    // Declared first so it runs before the stores below read their saved state.
+    // Declared first, so a second copy quits before touching saved state or audio.
+    private let single: Void = SingleInstance.enforce()
+    // Runs before the stores below read their saved state.
     private let migrated: Void = LegacyMigration.run()
     @State private var devices = DeviceManager()
     @State private var store = ProfileStore()
